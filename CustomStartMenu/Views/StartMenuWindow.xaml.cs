@@ -74,6 +74,10 @@ public partial class StartMenuWindow : Window
     private Group? _draggedGroup;
     private Button? _draggedGroupButton;
     
+    // Drop indicator for visual feedback during drag
+    private Border? _dropIndicator;
+    private int _lastDropIndex = -1;
+    
     // Mouse hook for click outside detection
     private readonly MouseHookService _mouseHookService;
     
@@ -82,20 +86,14 @@ public partial class StartMenuWindow : Window
     private TextBlock? _activeRenameTextBlock;
     private PinnedItem? _renamingItem;
 
-    // Inline tab edit (new tab name / rename tab)
-    private TextBox? _activeTabEditTextBox;
-    private Button? _activeTabEditButton;
-    private string? _activeTabEditTabId;
-
     public StartMenuWindow()
     {
         InitializeComponent();
-        SetUserName();
 
         _searchService = new SearchService();
         _pinnedItemsService = App.Instance.PinnedItemsService;
         _iconService = IconService.Instance;
-        _settingsService = new SettingsService();
+        _settingsService = App.Instance.SettingsService;
         _mouseHookService = new MouseHookService();
         
         _pinnedItemsService.PinnedItemsChanged += OnPinnedItemsChanged;
@@ -145,24 +143,13 @@ public partial class StartMenuWindow : Window
     private void ApplyTransparency()
     {
         var transparency = _settingsService.Settings.MenuTransparency;
+        var darkness = _settingsService.Settings.BackgroundDarkness;
         
-        // Create a new brush with the transparency applied
-        // Base color is #202020 (dark gray), we apply the transparency as alpha
+        // Create a new brush with the transparency and darkness applied
         var alpha = (byte)(transparency * 255);
-        var backgroundColor = Color.FromArgb(alpha, 0x20, 0x20, 0x20);
+        var gray = (byte)darkness;
+        var backgroundColor = Color.FromArgb(alpha, gray, gray, gray);
         MainBorder.Background = new SolidColorBrush(backgroundColor);
-    }
-
-    private void SetUserName()
-    {
-        try
-        {
-            UserNameText.Text = Environment.UserName;
-        }
-        catch
-        {
-            UserNameText.Text = "Kullanıcı";
-        }
     }
 
     private void Window_Loaded(object sender, RoutedEventArgs e)
@@ -231,12 +218,6 @@ public partial class StartMenuWindow : Window
 
         switch (settings.Size)
         {
-            case MenuSize.Small:
-                Width = 500;
-                Height = 600;
-                WindowState = WindowState.Normal;
-                break;
-
             case MenuSize.Normal:
                 Width = 650;
                 Height = 750;
@@ -246,12 +227,6 @@ public partial class StartMenuWindow : Window
             case MenuSize.Large:
                 Width = 900;
                 Height = 850;
-                WindowState = WindowState.Normal;
-                break;
-
-            case MenuSize.VeryLarge:
-                Width = 1100;
-                Height = 950;
                 WindowState = WindowState.Normal;
                 break;
 
@@ -420,12 +395,6 @@ public partial class StartMenuWindow : Window
             e.Handled = true;
             return;
         }
-
-        // Don't switch to search mode while typing into any TextBox (e.g., inline rename/new tab name)
-        if (FocusManager.GetFocusedElement(this) is TextBox)
-        {
-            return;
-        }
         
         // Don't switch to search mode if inline rename is active
         if (_activeRenameTextBox != null)
@@ -454,14 +423,6 @@ public partial class StartMenuWindow : Window
         Dispatcher.Invoke(() =>
         {
             if (!IsVisible) return;
-
-            // If the user is already typing into a TextBox (e.g., SearchBox),
-            // let WPF handle the input. Otherwise we end up appending the same
-            // character twice: once by WPF and once by this global hook.
-            if (FocusManager.GetFocusedElement(this) is TextBox)
-            {
-                return;
-            }
             
             // Don't switch to search mode if assigning hotkey
             if (_isAssigningHotkey) return;
@@ -494,8 +455,8 @@ public partial class StartMenuWindow : Window
 
     private void Window_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
     {
-        // Switch tabs with mouse wheel when not in search mode and not in settings view
-        if (!_isInSearchMode && !IsMouseOverScrollableContent() && SettingsView.Visibility != Visibility.Visible)
+        // Switch tabs with mouse wheel when not in search mode
+        if (!_isInSearchMode && !IsMouseOverScrollableContent())
         {
             var tabs = _pinnedItemsService.Tabs.OrderBy(t => t.Order).ToList();
             var currentIndex = tabs.FindIndex(t => t.Id == _currentTabId);
@@ -551,11 +512,6 @@ public partial class StartMenuWindow : Window
         SearchResultsPanel.Items.Clear();
         SearchingText.Visibility = Visibility.Collapsed;
         NoResultsText.Visibility = Visibility.Collapsed;
-        
-        // Hide tabs and show close button header with Arama title
-        TabBarPanel.Visibility = Visibility.Collapsed;
-        CloseButtonHeader.Visibility = Visibility.Visible;
-        ViewTitleText.Text = "Arama";
     }
 
     private void SwitchToPinnedView()
@@ -572,10 +528,6 @@ public partial class StartMenuWindow : Window
         SettingsView.Visibility = Visibility.Collapsed;
         PinnedItemsView.Visibility = Visibility.Visible;
         _searchCts?.Cancel();
-        
-        // Show tabs and hide close button header
-        TabBarPanel.Visibility = Visibility.Visible;
-        CloseButtonHeader.Visibility = Visibility.Collapsed;
     }
 
     #region Tab Management
@@ -654,7 +606,7 @@ public partial class StartMenuWindow : Window
         var contextMenu = new ContextMenu();
 
         var renameItem = new MenuItem { Header = "Yeniden Adlandır" };
-        renameItem.Click += (s, e) => StartInlineTabEdit(tab, button);
+        renameItem.Click += (s, e) => ShowRenameTabDialog(tab);
 
         var deleteItem = new MenuItem { Header = "Sekmeyi Sil" };
         deleteItem.Click += (s, e) =>
@@ -693,175 +645,91 @@ public partial class StartMenuWindow : Window
         contextMenu.IsOpen = true;
     }
 
-    private void StartInlineTabEdit(Tab tab, Button tabButton)
+    private void ShowRenameTabDialog(Tab tab)
     {
-        // Cancel any pinned-item inline rename first
-        CancelInlineRename();
-
-        // Cancel any existing tab edit
-        CancelInlineTabEdit();
-
-        if (TabBarPanel.Visibility != Visibility.Visible)
+        var dialog = new Window
         {
-            // Tabs are hidden in search/settings; ignore rename in that state
-            return;
-        }
-
-        if (tabButton.Content is not TextBlock currentTextBlock)
-        {
-            return;
-        }
-
-        var textBox = new TextBox
-        {
-            Text = tab.Name,
-            MinWidth = 80,
-            MaxWidth = 150,
-            Padding = new Thickness(8, 6, 8, 6),
-            Background = new SolidColorBrush(Color.FromArgb(40, 255, 255, 255)),
-            Foreground = (Brush)FindResource("TextBrush"),
-            BorderBrush = (Brush)FindResource("AccentBrush"),
-            BorderThickness = new Thickness(1),
-            CaretBrush = (Brush)FindResource("TextBrush"),
-            VerticalContentAlignment = VerticalAlignment.Center
+            Title = "Sekmeyi Yeniden Adlandır",
+            Width = 300,
+            Height = 120,
+            WindowStartupLocation = WindowStartupLocation.CenterScreen,
+            WindowStyle = WindowStyle.ToolWindow,
+            ResizeMode = ResizeMode.NoResize
         };
 
-        _activeTabEditTextBox = textBox;
-        _activeTabEditButton = tabButton;
-        _activeTabEditTabId = tab.Id;
+        var panel = new StackPanel { Margin = new Thickness(16) };
+        var textBox = new TextBox { Text = tab.Name, Margin = new Thickness(0, 0, 0, 12) };
+        var buttonPanel = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
+        
+        var okButton = new Button { Content = "Tamam", Width = 75, Margin = new Thickness(0, 0, 8, 0) };
+        var cancelButton = new Button { Content = "İptal", Width = 75 };
 
-        tabButton.Content = textBox;
+        okButton.Click += (s, e) =>
+        {
+            if (!string.IsNullOrWhiteSpace(textBox.Text))
+            {
+                _pinnedItemsService.RenameTab(tab.Id, textBox.Text);
+                dialog.Close();
+            }
+        };
+
+        cancelButton.Click += (s, e) => dialog.Close();
+
+        buttonPanel.Children.Add(okButton);
+        buttonPanel.Children.Add(cancelButton);
+        panel.Children.Add(textBox);
+        panel.Children.Add(buttonPanel);
+        dialog.Content = panel;
+
         textBox.SelectAll();
         textBox.Focus();
 
-        textBox.KeyDown += TabEditTextBox_KeyDown;
-        textBox.LostFocus += TabEditTextBox_LostFocus;
-    }
-
-    private void TabEditTextBox_KeyDown(object sender, KeyEventArgs e)
-    {
-        if (e.Key == Key.Enter)
-        {
-            CommitInlineTabEdit();
-            e.Handled = true;
-        }
-        else if (e.Key == Key.Escape)
-        {
-            CancelInlineTabEdit();
-            e.Handled = true;
-        }
-    }
-
-    private void TabEditTextBox_LostFocus(object sender, RoutedEventArgs e)
-    {
-        // Commit on blur (like pinned item rename), but don't allow empty names
-        CommitInlineTabEdit();
-    }
-
-    private void CommitInlineTabEdit()
-    {
-        if (_activeTabEditTextBox == null)
-        {
-            return;
-        }
-
-        var newName = _activeTabEditTextBox.Text.Trim();
-        if (!string.IsNullOrWhiteSpace(newName) && !string.IsNullOrWhiteSpace(_activeTabEditTabId))
-        {
-            _pinnedItemsService.RenameTab(_activeTabEditTabId, newName);
-        }
-
-        CancelInlineTabEdit(refresh: true);
-    }
-
-    private void CancelInlineTabEdit(bool refresh = false)
-    {
-        if (_activeTabEditTextBox != null)
-        {
-            _activeTabEditTextBox.KeyDown -= TabEditTextBox_KeyDown;
-            _activeTabEditTextBox.LostFocus -= TabEditTextBox_LostFocus;
-        }
-
-        _activeTabEditTextBox = null;
-        _activeTabEditButton = null;
-        _activeTabEditTabId = null;
-
-        if (refresh)
-        {
-            RefreshTabs();
-            RefreshPinnedItems();
-        }
-        else
-        {
-            RefreshTabs();
-        }
+        dialog.ShowDialog();
     }
 
     private void AddTab_Click(object sender, RoutedEventArgs e)
     {
-        // Create inline TextBox for new tab name
-        var textBox = new TextBox
+        var dialog = new Window
         {
-            Text = "Yeni Sekme",
-            MinWidth = 80,
-            MaxWidth = 150,
-            Padding = new Thickness(8, 6, 8, 6),
-            Background = new SolidColorBrush(Color.FromArgb(40, 255, 255, 255)),
-            Foreground = (Brush)FindResource("TextBrush"),
-            BorderBrush = (Brush)FindResource("AccentBrush"),
-            BorderThickness = new Thickness(1),
-            CaretBrush = (Brush)FindResource("TextBrush"),
-            VerticalContentAlignment = VerticalAlignment.Center
+            Title = "Yeni Sekme",
+            Width = 300,
+            Height = 120,
+            WindowStartupLocation = WindowStartupLocation.CenterScreen,
+            WindowStyle = WindowStyle.ToolWindow,
+            ResizeMode = ResizeMode.NoResize
         };
+
+        var panel = new StackPanel { Margin = new Thickness(16) };
+        var textBox = new TextBox { Text = "Yeni Sekme", Margin = new Thickness(0, 0, 0, 12) };
+        var buttonPanel = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
         
-        // Add to tabs panel
-        TabsPanel.Children.Add(textBox);
-        _activeTabEditTextBox = textBox;
+        var okButton = new Button { Content = "Ekle", Width = 75, Margin = new Thickness(0, 0, 8, 0) };
+        var cancelButton = new Button { Content = "İptal", Width = 75 };
+
+        okButton.Click += (s, args) =>
+        {
+            if (!string.IsNullOrWhiteSpace(textBox.Text))
+            {
+                var newTab = _pinnedItemsService.AddTab(textBox.Text);
+                _currentTabId = newTab.Id;
+                RefreshTabs();
+                RefreshPinnedItems();
+                dialog.Close();
+            }
+        };
+
+        cancelButton.Click += (s, args) => dialog.Close();
+
+        buttonPanel.Children.Add(okButton);
+        buttonPanel.Children.Add(cancelButton);
+        panel.Children.Add(textBox);
+        panel.Children.Add(buttonPanel);
+        dialog.Content = panel;
+
         textBox.SelectAll();
         textBox.Focus();
-        
-        // Handle Enter key to confirm
-        textBox.KeyDown += (s, args) =>
-        {
-            if (args.Key == Key.Enter)
-            {
-                var name = textBox.Text.Trim();
-                if (!string.IsNullOrWhiteSpace(name))
-                {
-                    var newTab = _pinnedItemsService.AddTab(name);
-                    _currentTabId = newTab.Id;
-                }
-                TabsPanel.Children.Remove(textBox);
-                _activeTabEditTextBox = null;
-                RefreshTabs();
-                RefreshPinnedItems();
-                args.Handled = true;
-            }
-            else if (args.Key == Key.Escape)
-            {
-                TabsPanel.Children.Remove(textBox);
-                _activeTabEditTextBox = null;
-                args.Handled = true;
-            }
-        };
-        
-        // Handle lost focus to confirm or cancel
-        textBox.LostFocus += (s, args) =>
-        {
-            if (TabsPanel.Children.Contains(textBox))
-            {
-                var name = textBox.Text.Trim();
-                if (!string.IsNullOrWhiteSpace(name))
-                {
-                    var newTab = _pinnedItemsService.AddTab(name);
-                    _currentTabId = newTab.Id;
-                }
-                TabsPanel.Children.Remove(textBox);
-                _activeTabEditTextBox = null;
-                RefreshTabs();
-                RefreshPinnedItems();
-            }
-        };
+
+        dialog.ShowDialog();
     }
 
     #endregion
@@ -1287,38 +1155,65 @@ public partial class StartMenuWindow : Window
     {
         var showIconsOnly = _settingsService.Settings.ShowIconsOnly;
         var itemsPerRow = _settingsService.Settings.ItemsPerRow;
-        // Button size (100 or 60) + margin (4 on each side = 8 total)
-        var itemWidth = showIconsOnly ? 68.0 : 108.0;
+        var minItemSize = _settingsService.Settings.MinItemSize;
+        var maxItemSize = _settingsService.Settings.MaxItemSize;
+        
+        // Get available width for items
+        var availableWidth = PinnedScrollViewer.ActualWidth > 0 ? PinnedScrollViewer.ActualWidth - 16 : 600; // -16 for padding
+        
+        // Calculate item size based on items per row setting
+        double buttonSize;
+        double itemWidth;
+        
+        if (itemsPerRow > 0)
+        {
+            // Calculate button size to fit exactly itemsPerRow items
+            var margin = 8.0; // 4px margin on each side
+            var totalMargin = margin * itemsPerRow;
+            buttonSize = (availableWidth - totalMargin) / itemsPerRow;
+            
+            // Clamp to min/max
+            buttonSize = Math.Clamp(buttonSize, minItemSize, maxItemSize);
+            itemWidth = buttonSize + margin;
+        }
+        else
+        {
+            // Auto mode: use default sizes
+            buttonSize = showIconsOnly ? 60 : 100;
+            itemWidth = buttonSize + 8;
+        }
+        
+        // Calculate actual items that fit per row after clamping
+        var actualItemsPerRow = itemsPerRow > 0 ? itemsPerRow : (int)(availableWidth / itemWidth);
+        var totalWidth = actualItemsPerRow * itemWidth;
 
         // Create a single WrapPanel for both items and group folders
         var mainWrapPanel = new WrapPanel
         {
             Orientation = Orientation.Horizontal,
             AllowDrop = true,
-            HorizontalAlignment = System.Windows.HorizontalAlignment.Left
+            HorizontalAlignment = System.Windows.HorizontalAlignment.Center, // Center the items
+            Width = totalWidth // Set fixed width for centering
         };
-
-        // Apply items per row constraint if set
-        if (itemsPerRow > 0)
-        {
-            mainWrapPanel.MaxWidth = itemWidth * itemsPerRow;
-        }
 
         mainWrapPanel.Drop += WrapPanel_Drop;
         mainWrapPanel.DragOver += WrapPanel_DragOver;
 
-        // Add ungrouped items
-        foreach (var item in ungroupedItems.OrderBy(i => i.Order))
+        // Get all elements sorted by GlobalOrder (mixed items and groups)
+        var sortedElements = _pinnedItemsService.GetSortedElementsForTab(currentTabId);
+        
+        foreach (var element in sortedElements)
         {
-            var button = CreatePinnedItemButton(item);
-            mainWrapPanel.Children.Add(button);
-        }
-
-        // Add group folders (same size as pinned items)
-        foreach (var group in groups.OrderBy(g => g.Order))
-        {
-            var groupButton = CreateGroupFolderButton(group, currentTabId);
-            mainWrapPanel.Children.Add(groupButton);
+            if (element is PinnedItem item)
+            {
+                var button = CreatePinnedItemButton(item, buttonSize);
+                mainWrapPanel.Children.Add(button);
+            }
+            else if (element is Group group)
+            {
+                var groupButton = CreateGroupFolderButton(group, currentTabId, buttonSize);
+                mainWrapPanel.Children.Add(groupButton);
+            }
         }
 
         PinnedItemsContainer.Children.Add(mainWrapPanel);
@@ -1453,16 +1348,96 @@ public partial class StartMenuWindow : Window
         if (e.Data.GetDataPresent("PinnedItem") || e.Data.GetDataPresent("Group"))
         {
             e.Effects = DragDropEffects.Move;
+            
+            if (sender is Grid grid)
+            {
+                var dropPosition = e.GetPosition(grid);
+                var showIconsOnly = _settingsService.Settings.ShowIconsOnly;
+                var cellSize = showIconsOnly ? 68 : 108;
+
+                var gridRow = (int)(dropPosition.Y / cellSize);
+                var gridCol = (int)(dropPosition.X / cellSize);
+
+                // Ensure within bounds
+                gridRow = Math.Max(0, Math.Min(gridRow, grid.RowDefinitions.Count - 1));
+                gridCol = Math.Max(0, Math.Min(gridCol, grid.ColumnDefinitions.Count - 1));
+                
+                ShowFreeFormDropIndicator(grid, gridRow, gridCol, cellSize);
+            }
         }
         else
         {
             e.Effects = DragDropEffects.None;
+            RemoveFreeFormDropIndicator();
         }
         e.Handled = true;
+    }
+    
+    private Border? _freeFormDropIndicator;
+    private int _lastFreeFormRow = -1;
+    private int _lastFreeFormCol = -1;
+    
+    /// <summary>
+    /// Shows drop indicator for FreeForm grid layout
+    /// </summary>
+    private void ShowFreeFormDropIndicator(Grid grid, int row, int col, int cellSize)
+    {
+        // Only update if position changed
+        if (row == _lastFreeFormRow && col == _lastFreeFormCol && _freeFormDropIndicator != null)
+            return;
+            
+        _lastFreeFormRow = row;
+        _lastFreeFormCol = col;
+        
+        // Remove existing indicator
+        RemoveFreeFormDropIndicator();
+        
+        // Create the drop indicator
+        _freeFormDropIndicator = new Border
+        {
+            Background = new SolidColorBrush(Color.FromArgb(60, 0, 120, 212)),
+            BorderBrush = new SolidColorBrush(Color.FromRgb(0x00, 0x78, 0xD4)),
+            BorderThickness = new Thickness(2),
+            CornerRadius = new CornerRadius(8),
+            Margin = new Thickness(4),
+            IsHitTestVisible = false,
+            Tag = "FreeFormDropIndicator"
+        };
+        
+        // Add glow effect
+        _freeFormDropIndicator.Effect = new System.Windows.Media.Effects.DropShadowEffect
+        {
+            Color = Color.FromRgb(0x00, 0x78, 0xD4),
+            BlurRadius = 15,
+            ShadowDepth = 0,
+            Opacity = 0.6
+        };
+        
+        Grid.SetRow(_freeFormDropIndicator, row);
+        Grid.SetColumn(_freeFormDropIndicator, col);
+        
+        grid.Children.Add(_freeFormDropIndicator);
+    }
+    
+    /// <summary>
+    /// Removes the FreeForm drop indicator
+    /// </summary>
+    private void RemoveFreeFormDropIndicator()
+    {
+        if (_freeFormDropIndicator != null && _freeFormDropIndicator.Parent is Grid parentGrid)
+        {
+            parentGrid.Children.Remove(_freeFormDropIndicator);
+        }
+        _freeFormDropIndicator = null;
+        _lastFreeFormRow = -1;
+        _lastFreeFormCol = -1;
     }
 
     private void FreeFormGrid_Drop(object sender, DragEventArgs e)
     {
+        // Remove drop indicator first
+        RemoveFreeFormDropIndicator();
+        
         if (sender is Grid grid && e.Data.GetDataPresent("PinnedItem"))
         {
             var droppedItem = e.Data.GetData("PinnedItem") as PinnedItem;
@@ -1549,15 +1524,19 @@ public partial class StartMenuWindow : Window
         PinnedItemsContainer.Children.Add(contentPanel);
     }
 
-    private Button CreateGroupFolderButton(Group group, string tabId)
+    private Button CreateGroupFolderButton(Group group, string tabId, double? customSize = null)
     {
         var showIconsOnly = _settingsService.Settings.ShowIconsOnly;
         var itemCount = _pinnedItemsService.GetItemsForTab(tabId, group.Id).Count();
         
-        // Adjust sizes based on icon-only mode
-        var folderSize = showIconsOnly ? 32 : 48;
-        var folderFontSize = showIconsOnly ? 20 : 28;
-        var folderMargin = showIconsOnly ? new Thickness(0) : new Thickness(0, 0, 0, 8);
+        // Calculate button size
+        var buttonSize = customSize ?? (showIconsOnly ? 60.0 : 100.0);
+        var isSmallMode = buttonSize < 80;
+        
+        // Adjust sizes based on button size
+        var folderSize = Math.Max(24, buttonSize * (showIconsOnly || isSmallMode ? 0.53 : 0.48));
+        var folderFontSize = Math.Max(14, buttonSize * 0.28);
+        var folderMargin = showIconsOnly || isSmallMode ? new Thickness(0) : new Thickness(0, 0, 0, 8);
 
         // Folder visual - show mini previews of first items
         var folderVisual = new Grid
@@ -1609,9 +1588,11 @@ public partial class StartMenuWindow : Window
             folderVisual.Children.Add(badge);
         }
 
-        // Create content based on icon-only mode
+        // Create content based on mode
         UIElement buttonContent;
-        if (showIconsOnly)
+        var textMaxWidth = Math.Max(50, buttonSize - 20);
+        
+        if (showIconsOnly || isSmallMode)
         {
             // Icon only - no text label
             buttonContent = folderVisual;
@@ -1630,24 +1611,30 @@ public partial class StartMenuWindow : Window
                 FontSize = 12,
                 Foreground = (Brush)FindResource("TextBrush"),
                 TextTrimming = TextTrimming.CharacterEllipsis,
-                MaxWidth = 80,
+                MaxWidth = textMaxWidth,
                 HorizontalAlignment = HorizontalAlignment.Center,
                 TextAlignment = TextAlignment.Center
             });
             buttonContent = folderContent;
         }
 
-        // Select appropriate style based on mode
-        var styleName = showIconsOnly ? "PinnedItemIconOnlyStyle" : "PinnedItemStyle";
-
+        // Create button with custom size
         var button = new Button
         {
-            Style = (Style)FindResource(styleName),
             Tag = group,
             ToolTip = $"{group.Name} ({itemCount} öğe)",
             Content = buttonContent,
-            AllowDrop = true
+            AllowDrop = true,
+            Width = buttonSize,
+            Height = buttonSize,
+            Margin = new Thickness(4),
+            Cursor = System.Windows.Input.Cursors.Hand,
+            Background = Brushes.Transparent,
+            BorderThickness = new Thickness(0)
         };
+        
+        // Apply custom style
+        button.Style = CreateDynamicPinnedItemStyle();
 
         // Click to open folder
         button.Click += (s, e) =>
@@ -1963,6 +1950,10 @@ public partial class StartMenuWindow : Window
             if (_draggedGroupButton != null)
                 _draggedGroupButton.Opacity = 1.0;
             
+            // Clean up drop indicators
+            RemoveDropIndicator();
+            RemoveFreeFormDropIndicator();
+            
             _isDragging = false;
             _draggedGroup = null;
             _draggedGroupButton = null;
@@ -1973,6 +1964,10 @@ public partial class StartMenuWindow : Window
     {
         if (_draggedGroupButton != null)
             _draggedGroupButton.Opacity = 1.0;
+        
+        // Clean up drop indicators
+        RemoveDropIndicator();
+        RemoveFreeFormDropIndicator();
             
         _isDragging = false;
         _draggedGroup = null;
@@ -2072,18 +2067,22 @@ public partial class StartMenuWindow : Window
         dialog.ShowDialog();
     }
 
-    private Button CreatePinnedItemButton(PinnedItem item)
+    private Button CreatePinnedItemButton(PinnedItem item, double? customSize = null)
     {
         var showIconsOnly = _settingsService.Settings.ShowIconsOnly;
+        
+        // Calculate button size - use custom size if provided
+        var buttonSize = customSize ?? (showIconsOnly ? 60.0 : 100.0);
+        var isSmallMode = buttonSize < 80;
         
         // Get real icon from IconService - use special method for internet shortcuts
         var icon = item.Type == PinnedItemType.InternetShortcut 
             ? _iconService.GetInternetShortcutIcon(item.Path)
             : _iconService.GetIcon(item.Path);
 
-        // Adjust icon size based on mode
-        var iconSize = showIconsOnly ? 32 : 40;
-        var iconMargin = showIconsOnly ? new Thickness(0) : new Thickness(0, 0, 0, 8);
+        // Adjust icon size based on button size
+        var iconSize = Math.Max(24, buttonSize * (showIconsOnly ? 0.53 : 0.4));
+        var iconMargin = showIconsOnly || isSmallMode ? new Thickness(0) : new Thickness(0, 0, 0, 8);
 
         // Determine fallback emoji based on item type
         var fallbackEmoji = item.Type switch
@@ -2092,6 +2091,8 @@ public partial class StartMenuWindow : Window
             PinnedItemType.InternetShortcut => "🌐",
             _ => "📦"
         };
+        
+        var fallbackFontSize = Math.Max(16, buttonSize * 0.32);
 
         var iconElement = icon != null
             ? (UIElement)new Image 
@@ -2105,14 +2106,16 @@ public partial class StartMenuWindow : Window
             : (UIElement)new TextBlock 
             { 
                 Text = fallbackEmoji, 
-                FontSize = showIconsOnly ? 24 : 32, 
+                FontSize = fallbackFontSize, 
                 HorizontalAlignment = HorizontalAlignment.Center, 
                 Margin = iconMargin 
             };
 
         // Create content based on icon-only mode
         UIElement buttonContent;
-        if (showIconsOnly)
+        var textMaxWidth = Math.Max(50, buttonSize - 20); // Text width based on button size
+        
+        if (showIconsOnly || isSmallMode)
         {
             // Icon only - no text label
             buttonContent = iconElement;
@@ -2126,7 +2129,7 @@ public partial class StartMenuWindow : Window
                 FontSize = 12, 
                 Foreground = (Brush)FindResource("TextBrush"), 
                 TextTrimming = TextTrimming.CharacterEllipsis, 
-                MaxWidth = 80, 
+                MaxWidth = textMaxWidth, 
                 HorizontalAlignment = HorizontalAlignment.Center, 
                 TextAlignment = TextAlignment.Center 
             };
@@ -2135,8 +2138,8 @@ public partial class StartMenuWindow : Window
             {
                 Text = item.DisplayName,
                 FontSize = 12,
-                MaxWidth = 80,
-                MinWidth = 60,
+                MaxWidth = textMaxWidth,
+                MinWidth = Math.Min(60, textMaxWidth),
                 HorizontalAlignment = HorizontalAlignment.Center,
                 TextAlignment = TextAlignment.Center,
                 Visibility = Visibility.Collapsed,
@@ -2168,16 +2171,23 @@ public partial class StartMenuWindow : Window
             };
         }
 
-        // Select appropriate style based on mode
-        var styleName = showIconsOnly ? "PinnedItemIconOnlyStyle" : "PinnedItemStyle";
-
+        // Create button with custom size if provided
         var button = new Button
         {
-            Style = (Style)FindResource(styleName),
             Tag = item,
             ToolTip = item.Path,
-            Content = buttonContent
+            Content = buttonContent,
+            Width = buttonSize,
+            Height = buttonSize,
+            Margin = new Thickness(4),
+            Cursor = System.Windows.Input.Cursors.Hand,
+            AllowDrop = true,
+            Background = Brushes.Transparent,
+            BorderThickness = new Thickness(0)
         };
+        
+        // Apply custom template for hover effects
+        button.Style = CreateDynamicPinnedItemStyle();
 
         button.Click += PinnedItem_Click;
         button.MouseRightButtonUp += PinnedItem_RightClick;
@@ -2188,6 +2198,48 @@ public partial class StartMenuWindow : Window
         button.PreviewMouseLeftButtonUp += PinnedItem_PreviewMouseLeftButtonUp;
 
         return button;
+    }
+    
+    /// <summary>
+    /// Creates a dynamic style for pinned item buttons with hover effects
+    /// </summary>
+    private Style CreateDynamicPinnedItemStyle()
+    {
+        var style = new Style(typeof(Button));
+        
+        style.Setters.Add(new Setter(Button.BackgroundProperty, Brushes.Transparent));
+        style.Setters.Add(new Setter(Button.ForegroundProperty, FindResource("TextBrush")));
+        style.Setters.Add(new Setter(Button.BorderThicknessProperty, new Thickness(0)));
+        style.Setters.Add(new Setter(Button.CursorProperty, System.Windows.Input.Cursors.Hand));
+        
+        var template = new ControlTemplate(typeof(Button));
+        var border = new FrameworkElementFactory(typeof(Border));
+        border.Name = "border";
+        border.SetValue(Border.BackgroundProperty, new TemplateBindingExtension(Button.BackgroundProperty));
+        border.SetValue(Border.CornerRadiusProperty, new CornerRadius(8));
+        border.SetValue(Border.PaddingProperty, new Thickness(8));
+        border.SetValue(Border.BorderThicknessProperty, new Thickness(2));
+        border.SetValue(Border.BorderBrushProperty, Brushes.Transparent);
+        
+        var contentPresenter = new FrameworkElementFactory(typeof(ContentPresenter));
+        contentPresenter.SetValue(ContentPresenter.HorizontalAlignmentProperty, HorizontalAlignment.Center);
+        contentPresenter.SetValue(ContentPresenter.VerticalAlignmentProperty, VerticalAlignment.Center);
+        border.AppendChild(contentPresenter);
+        
+        template.VisualTree = border;
+        
+        // Add triggers for hover and pressed states
+        var mouseOverTrigger = new Trigger { Property = UIElement.IsMouseOverProperty, Value = true };
+        mouseOverTrigger.Setters.Add(new Setter(Border.BackgroundProperty, new SolidColorBrush(Color.FromArgb(48, 255, 255, 255)), "border"));
+        template.Triggers.Add(mouseOverTrigger);
+        
+        var pressedTrigger = new Trigger { Property = Button.IsPressedProperty, Value = true };
+        pressedTrigger.Setters.Add(new Setter(Border.BackgroundProperty, new SolidColorBrush(Color.FromArgb(80, 255, 255, 255)), "border"));
+        template.Triggers.Add(pressedTrigger);
+        
+        style.Setters.Add(new Setter(Button.TemplateProperty, template));
+        
+        return style;
     }
 
     #region Drag & Drop
@@ -2227,6 +2279,10 @@ public partial class StartMenuWindow : Window
             if (_draggedButton != null)
                 _draggedButton.Opacity = 1.0;
             
+            // Clean up drop indicators
+            RemoveDropIndicator();
+            RemoveFreeFormDropIndicator();
+            
             _isDragging = false;
             _draggedItem = null;
             _draggedButton = null;
@@ -2237,6 +2293,10 @@ public partial class StartMenuWindow : Window
     {
         if (_draggedButton != null)
             _draggedButton.Opacity = 1.0;
+        
+        // Clean up drop indicators
+        RemoveDropIndicator();
+        RemoveFreeFormDropIndicator();
             
         _isDragging = false;
         _draggedItem = null;
@@ -2248,51 +2308,205 @@ public partial class StartMenuWindow : Window
         if (e.Data.GetDataPresent("PinnedItem") || e.Data.GetDataPresent("Group"))
         {
             e.Effects = DragDropEffects.Move;
+            
+            if (sender is WrapPanel wrapPanel)
+            {
+                var dropPosition = e.GetPosition(wrapPanel);
+                var groupId = wrapPanel.Tag as string;
+                var isInsideGroup = groupId != null;
+                
+                int dropIndex;
+                if (isInsideGroup)
+                {
+                    dropIndex = GetDropIndex(wrapPanel, dropPosition);
+                }
+                else
+                {
+                    dropIndex = GetGlobalDropIndex(wrapPanel, dropPosition);
+                }
+                
+                // Only update indicator if index changed
+                if (dropIndex != _lastDropIndex)
+                {
+                    _lastDropIndex = dropIndex;
+                    ShowDropIndicator(wrapPanel, dropIndex);
+                }
+            }
         }
         else
         {
             e.Effects = DragDropEffects.None;
+            RemoveDropIndicator();
         }
         e.Handled = true;
+    }
+    
+    /// <summary>
+    /// Creates and shows a visual drop indicator at the specified index
+    /// </summary>
+    private void ShowDropIndicator(WrapPanel wrapPanel, int dropIndex)
+    {
+        // Remove existing indicator
+        RemoveDropIndicator();
+        
+        var showIconsOnly = _settingsService.Settings.ShowIconsOnly;
+        var indicatorHeight = showIconsOnly ? 60.0 : 100.0;
+        
+        // Create the drop indicator
+        _dropIndicator = new Border
+        {
+            Width = 4,
+            Height = indicatorHeight,
+            Background = new SolidColorBrush(Color.FromRgb(0x00, 0x78, 0xD4)), // Accent blue
+            CornerRadius = new CornerRadius(2),
+            Margin = new Thickness(2, 4, 2, 4),
+            VerticalAlignment = VerticalAlignment.Center,
+            Tag = "DropIndicator"
+        };
+        
+        // Add glow effect
+        _dropIndicator.Effect = new System.Windows.Media.Effects.DropShadowEffect
+        {
+            Color = Color.FromRgb(0x00, 0x78, 0xD4),
+            BlurRadius = 10,
+            ShadowDepth = 0,
+            Opacity = 0.8
+        };
+        
+        // Insert at the correct position
+        var insertIndex = 0;
+        var currentElementIndex = 0;
+        
+        for (int i = 0; i < wrapPanel.Children.Count; i++)
+        {
+            var child = wrapPanel.Children[i];
+            
+            // Skip existing drop indicators
+            if (child is Border border && border.Tag as string == "DropIndicator")
+                continue;
+                
+            if (child is Button btn && (btn.Tag is PinnedItem || btn.Tag is Group))
+            {
+                if (currentElementIndex == dropIndex)
+                {
+                    insertIndex = i;
+                    break;
+                }
+                currentElementIndex++;
+            }
+            insertIndex = i + 1;
+        }
+        
+        // Clamp insert index
+        insertIndex = Math.Min(insertIndex, wrapPanel.Children.Count);
+        
+        wrapPanel.Children.Insert(insertIndex, _dropIndicator);
+    }
+    
+    /// <summary>
+    /// Removes the drop indicator from the panel
+    /// </summary>
+    private void RemoveDropIndicator()
+    {
+        if (_dropIndicator != null && _dropIndicator.Parent is Panel parent)
+        {
+            parent.Children.Remove(_dropIndicator);
+        }
+        _dropIndicator = null;
+        _lastDropIndex = -1;
     }
 
     private void WrapPanel_Drop(object sender, DragEventArgs e)
     {
-        // Handle group reorder drop on WrapPanel
-        if (e.Data.GetDataPresent("Group") && sender is WrapPanel wrapPanel)
+        // Remove drop indicator first
+        RemoveDropIndicator();
+        
+        if (sender is not WrapPanel wrapPanel) return;
+        
+        var groupId = wrapPanel.Tag as string;
+        var dropPosition = e.GetPosition(wrapPanel);
+        
+        // Check if we're inside a group folder (has a Tag with groupId)
+        var isInsideGroup = groupId != null;
+        
+        // Handle group reorder drop on main WrapPanel (not inside a group)
+        if (e.Data.GetDataPresent("Group") && !isInsideGroup)
         {
             var droppedGroup = e.Data.GetData("Group") as Group;
             if (droppedGroup == null) return;
 
-            var dropPosition = e.GetPosition(wrapPanel);
-            var dropIndex = GetGroupDropIndex(wrapPanel, dropPosition);
-            
-            _pinnedItemsService.MoveGroup(droppedGroup.Id, dropIndex);
+            // Use global index for mixed sorting
+            var globalDropIndex = GetGlobalDropIndex(wrapPanel, dropPosition);
+            _pinnedItemsService.MoveElementToGlobalPosition(droppedGroup.Id, true, globalDropIndex, _currentTabId);
             RefreshPinnedItems();
             e.Handled = true;
             return;
         }
 
-        if (e.Data.GetDataPresent("PinnedItem") && sender is WrapPanel wp)
+        if (e.Data.GetDataPresent("PinnedItem"))
         {
             var droppedItem = e.Data.GetData("PinnedItem") as PinnedItem;
             if (droppedItem == null) return;
 
-            var groupId = wp.Tag as string;
-            var dropPosition = e.GetPosition(wp);
-            
-            // Find drop index based on position
-            var dropIndex = GetDropIndex(wp, dropPosition);
-
-            // Move item
-            if (droppedItem.GroupId != groupId)
+            // If dropping inside a group
+            if (isInsideGroup)
             {
-                _pinnedItemsService.MoveItemToGroup(droppedItem.Id, groupId);
+                // Move to group if not already in it
+                if (droppedItem.GroupId != groupId)
+                {
+                    _pinnedItemsService.MoveItemToGroup(droppedItem.Id, groupId);
+                }
+                
+                // Get index within group
+                var dropIndex = GetDropIndex(wrapPanel, dropPosition);
+                _pinnedItemsService.MoveItem(droppedItem.Id, dropIndex, _currentTabId, groupId);
+            }
+            else
+            {
+                // Dropping on main panel - use global ordering
+                // First, ensure item is ungrouped
+                if (droppedItem.GroupId != null)
+                {
+                    _pinnedItemsService.MoveItemToGroup(droppedItem.Id, null);
+                }
+                
+                // Use global index for mixed sorting
+                var globalDropIndex = GetGlobalDropIndex(wrapPanel, dropPosition);
+                _pinnedItemsService.MoveElementToGlobalPosition(droppedItem.Id, false, globalDropIndex, _currentTabId);
             }
             
-            _pinnedItemsService.MoveItem(droppedItem.Id, dropIndex, _currentTabId, groupId);
+            RefreshPinnedItems();
         }
         e.Handled = true;
+    }
+    
+    /// <summary>
+    /// Get global drop index considering both PinnedItems and Groups mixed together
+    /// </summary>
+    private int GetGlobalDropIndex(WrapPanel wrapPanel, Point dropPosition)
+    {
+        int globalIndex = 0;
+        
+        for (int i = 0; i < wrapPanel.Children.Count; i++)
+        {
+            var child = wrapPanel.Children[i];
+            
+            // Check if this child is a valid draggable element (PinnedItem or Group)
+            if (child is Button btn && (btn.Tag is PinnedItem || btn.Tag is Group))
+            {
+                var childPos = child.TranslatePoint(new Point(0, 0), wrapPanel);
+                var childRect = new Rect(childPos, new Size(((FrameworkElement)child).ActualWidth, ((FrameworkElement)child).ActualHeight));
+                
+                // Check if drop position is before the center of this child
+                if (dropPosition.X < childRect.Left + childRect.Width / 2)
+                {
+                    return globalIndex;
+                }
+                
+                globalIndex++;
+            }
+        }
+        return globalIndex;
     }
 
     private int GetGroupDropIndex(WrapPanel wrapPanel, Point dropPosition)
@@ -2320,6 +2534,8 @@ public partial class StartMenuWindow : Window
 
     private int GetDropIndex(WrapPanel wrapPanel, Point dropPosition)
     {
+        int itemIndex = 0; // Index only for PinnedItem elements
+        
         for (int i = 0; i < wrapPanel.Children.Count; i++)
         {
             var child = wrapPanel.Children[i];
@@ -2333,10 +2549,12 @@ public partial class StartMenuWindow : Window
             
             if (dropPosition.X < childRect.Left + childRect.Width / 2)
             {
-                return i;
+                return itemIndex;
             }
+            
+            itemIndex++;
         }
-        return wrapPanel.Children.Count;
+        return itemIndex;
     }
 
     private void PinnedScrollViewer_DragOver(object sender, DragEventArgs e)
@@ -2731,11 +2949,6 @@ public partial class StartMenuWindow : Window
         SettingsView.Visibility = Visibility.Visible;
         _isInSearchMode = false;
         
-        // Hide tabs and show close button header with Ayarlar title
-        TabBarPanel.Visibility = Visibility.Collapsed;
-        CloseButtonHeader.Visibility = Visibility.Visible;
-        ViewTitleText.Text = "Ayarlar";
-        
         // Load current settings into controls
         LoadSettingsIntoControls();
     }
@@ -2766,13 +2979,11 @@ public partial class StartMenuWindow : Window
         // Size
         SizeComboBox.SelectedIndex = settings.Size switch
         {
-            MenuSize.Small => 0,
-            MenuSize.Normal => 1,
-            MenuSize.Large => 2,
-            MenuSize.VeryLarge => 3,
-            MenuSize.Fullscreen => 4,
-            MenuSize.Custom => 5,
-            _ => 1
+            MenuSize.Normal => 0,
+            MenuSize.Large => 1,
+            MenuSize.Fullscreen => 2,
+            MenuSize.Custom => 3,
+            _ => 0
         };
         CustomSizePanel.Visibility = settings.Size == MenuSize.Custom ? Visibility.Visible : Visibility.Collapsed;
         CustomWidthTextBox.Text = settings.CustomWidth.ToString();
@@ -2787,11 +2998,15 @@ public partial class StartMenuWindow : Window
         // Override Windows Key
         OverrideWinKeyCheckBox.IsChecked = settings.OverrideWindowsStartButton;
 
+        // Background Darkness
+        BackgroundDarknessSlider.Value = settings.BackgroundDarkness;
+        BackgroundDarknessLabel.Text = $"Arka plan koyuluğu: {settings.BackgroundDarkness}";
+
         // Hotkey - update display only
         UpdateHotkeyDisplayText();
     }
 
-    private void CloseViewButton_Click(object sender, RoutedEventArgs e)
+    private void SettingsBackButton_Click(object sender, RoutedEventArgs e)
     {
         SwitchToPinnedView();
     }
@@ -2869,10 +3084,8 @@ public partial class StartMenuWindow : Window
         {
             var size = sizeStr switch
             {
-                "Small" => MenuSize.Small,
                 "Normal" => MenuSize.Normal,
                 "Large" => MenuSize.Large,
-                "VeryLarge" => MenuSize.VeryLarge,
                 "Fullscreen" => MenuSize.Fullscreen,
                 "Custom" => MenuSize.Custom,
                 _ => MenuSize.Normal
@@ -3065,6 +3278,17 @@ public partial class StartMenuWindow : Window
         {
             _settingsService.UpdateSetting(nameof(AppSettings.AccentColor), colorHex);
             App.Instance.ApplyThemeColor(colorHex);
+        }
+    }
+
+    private void BackgroundDarknessSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (BackgroundDarknessLabel != null && _settingsService != null)
+        {
+            var value = (int)e.NewValue;
+            BackgroundDarknessLabel.Text = $"Arka plan koyuluğu: {value}";
+            _settingsService.UpdateSetting(nameof(AppSettings.BackgroundDarkness), value);
+            ApplyTransparency(); // Apply immediately
         }
     }
 

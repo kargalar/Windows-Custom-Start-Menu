@@ -183,6 +183,16 @@ public class SettingsService : IDisposable
 
         // Clamp items per row (0 = auto, 1-10 = fixed)
         _settings.ItemsPerRow = Math.Clamp(_settings.ItemsPerRow, 0, 10);
+        
+        // Clamp min/max item sizes
+        _settings.MinItemSize = Math.Clamp(_settings.MinItemSize, 40, 100);
+        _settings.MaxItemSize = Math.Clamp(_settings.MaxItemSize, 80, 200);
+        
+        // Ensure max is greater than min
+        if (_settings.MaxItemSize < _settings.MinItemSize)
+        {
+            _settings.MaxItemSize = _settings.MinItemSize + 40;
+        }
 
         // Clamp custom dimensions
         _settings.CustomWidth = Math.Clamp(_settings.CustomWidth, 400, 2000);
@@ -196,6 +206,9 @@ public class SettingsService : IDisposable
         {
             _settings.AccentColor = "#0078D4";
         }
+        
+        // Clamp background darkness
+        _settings.BackgroundDarkness = Math.Clamp(_settings.BackgroundDarkness, 0, 80);
     }
 
     public void Dispose()

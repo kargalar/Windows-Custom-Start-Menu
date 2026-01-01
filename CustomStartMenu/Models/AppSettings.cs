@@ -55,6 +55,16 @@ public class AppSettings
     public int ItemsPerRow { get; set; } = 0;
 
     /// <summary>
+    /// Minimum item size in pixels (default: 60)
+    /// </summary>
+    public int MinItemSize { get; set; } = 60;
+
+    /// <summary>
+    /// Maximum item size in pixels (default: 120)
+    /// </summary>
+    public int MaxItemSize { get; set; } = 120;
+
+    /// <summary>
     /// Menu size preset
     /// </summary>
     public MenuSize Size { get; set; } = MenuSize.Normal;
@@ -73,6 +83,12 @@ public class AppSettings
     /// Theme accent color (hex string)
     /// </summary>
     public string AccentColor { get; set; } = "#0078D4";
+
+    /// <summary>
+    /// Background darkness level (0 = black, 255 = light gray)
+    /// Default is 32 (#202020)
+    /// </summary>
+    public int BackgroundDarkness { get; set; } = 32;
 }
 
 /// <summary>
@@ -133,10 +149,8 @@ public enum MenuPosition
 /// </summary>
 public enum MenuSize
 {
-    Small,      // 500x600
     Normal,     // 650x750
     Large,      // 900x850
-    VeryLarge,  // 1100x950
     Fullscreen, // Screen dimensions
     Custom      // User-defined
 }
