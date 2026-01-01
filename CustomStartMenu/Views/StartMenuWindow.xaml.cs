@@ -74,6 +74,10 @@ public partial class StartMenuWindow : Window
     private Group? _draggedGroup;
     private Button? _draggedGroupButton;
     
+    // Prevent duplicate character input
+    private DateTime _lastCharInputTime = DateTime.MinValue;
+    private char _lastCharInput = '\0';
+    
     // Drop indicator for visual feedback during drag
     private Border? _dropIndicator;
     private int _lastDropIndex = -1;
@@ -413,6 +417,13 @@ public partial class StartMenuWindow : Window
             return;
         }
         
+        // Don't interfere if already in search mode and SearchBox has focus
+        // This prevents double character input
+        if (_isInSearchMode && SearchBox.IsFocused)
+        {
+            return;
+        }
+        
         // Don't switch to search mode while typing into any TextBox (e.g., inline rename/new tab name)
         if (FocusManager.GetFocusedElement(this) is TextBox)
         {
@@ -434,6 +445,13 @@ public partial class StartMenuWindow : Window
         // Any text input switches to search mode
         if (!_isInSearchMode && !string.IsNullOrWhiteSpace(e.Text))
         {
+            // Track this input to prevent duplicate from global hook
+            if (e.Text.Length > 0)
+            {
+                _lastCharInputTime = DateTime.Now;
+                _lastCharInput = e.Text[0];
+            }
+            
             SwitchToSearchView();
             SearchBox.Text = e.Text;
             SearchBox.CaretIndex = SearchBox.Text.Length;
@@ -446,6 +464,18 @@ public partial class StartMenuWindow : Window
         Dispatcher.Invoke(() =>
         {
             if (!IsVisible) return;
+            
+            // Prevent duplicate input - if same character was just processed within 50ms, skip
+            var now = DateTime.Now;
+            if (character == _lastCharInput && (now - _lastCharInputTime).TotalMilliseconds < 50)
+            {
+                return;
+            }
+            _lastCharInputTime = now;
+            _lastCharInput = character;
+            
+            // Don't add character if SearchBox already has focus (WPF will handle it)
+            if (_isInSearchMode && SearchBox.IsFocused) return;
             
             // Don't switch to search mode if assigning hotkey
             if (_isAssigningHotkey) return;
@@ -465,7 +495,7 @@ public partial class StartMenuWindow : Window
             }
             else
             {
-                // Already in search mode, append character
+                // Already in search mode but SearchBox doesn't have focus, append character
                 SearchBox.Text += character;
                 SearchBox.CaretIndex = SearchBox.Text.Length;
             }
