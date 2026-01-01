@@ -1271,38 +1271,19 @@ public partial class StartMenuWindow : Window
     private void RenderOrderedLayout(List<PinnedItem> ungroupedItems, List<Group> groups, string currentTabId)
     {
         var showIconsOnly = _settingsService.Settings.ShowIconsOnly;
-        var itemsPerRow = _settingsService.Settings.ItemsPerRow;
-        var minItemSize = _settingsService.Settings.MinItemSize;
-        var maxItemSize = _settingsService.Settings.MaxItemSize;
+        var itemSize = _settingsService.Settings.ItemSize;
         
         // Get available width for items
         var availableWidth = PinnedScrollViewer.ActualWidth > 0 ? PinnedScrollViewer.ActualWidth - 16 : 600; // -16 for padding
         
-        // Calculate item size based on items per row setting
-        double buttonSize;
-        double itemWidth;
+        // Use ItemSize directly as button size
+        double buttonSize = itemSize;
+        double margin = 8.0; // 4px margin on each side
+        double itemWidth = buttonSize + margin;
         
-        if (itemsPerRow > 0)
-        {
-            // Calculate button size to fit exactly itemsPerRow items
-            var margin = 8.0; // 4px margin on each side
-            var totalMargin = margin * itemsPerRow;
-            buttonSize = (availableWidth - totalMargin) / itemsPerRow;
-            
-            // Clamp to min/max
-            buttonSize = Math.Clamp(buttonSize, minItemSize, maxItemSize);
-            itemWidth = buttonSize + margin;
-        }
-        else
-        {
-            // Auto mode: use default sizes
-            buttonSize = showIconsOnly ? 60 : 100;
-            itemWidth = buttonSize + 8;
-        }
-        
-        // Calculate actual items that fit per row after clamping
-        var actualItemsPerRow = itemsPerRow > 0 ? itemsPerRow : (int)(availableWidth / itemWidth);
-        var totalWidth = actualItemsPerRow * itemWidth;
+        // Calculate items per row based on item size
+        var itemsPerRow = Math.Max(1, (int)(availableWidth / itemWidth));
+        var totalWidth = itemsPerRow * itemWidth;
 
         // Create a single WrapPanel for both items and group folders
         var mainWrapPanel = new WrapPanel
@@ -1341,8 +1322,8 @@ public partial class StartMenuWindow : Window
     /// </summary>
     private void RenderFreeFormLayout(List<PinnedItem> ungroupedItems, List<Group> groups, string currentTabId)
     {
-        var showIconsOnly = _settingsService.Settings.ShowIconsOnly;
-        var cellSize = showIconsOnly ? 68 : 108; // Button size + margin
+        var itemSize = _settingsService.Settings.ItemSize;
+        var cellSize = itemSize + 8; // Button size + margin
         
         // Calculate grid dimensions based on available space
         var availableWidth = PinnedScrollViewer.ActualWidth > 0 ? PinnedScrollViewer.ActualWidth : 600;
@@ -1390,7 +1371,7 @@ public partial class StartMenuWindow : Window
             // Ensure within bounds
             if (row < rows && col < columns)
             {
-                var button = CreatePinnedItemButton(item);
+                var button = CreatePinnedItemButton(item, itemSize);
                 Grid.SetRow(button, row);
                 Grid.SetColumn(button, col);
                 grid.Children.Add(button);
@@ -1415,7 +1396,7 @@ public partial class StartMenuWindow : Window
                 }
             }
 
-            var button = CreatePinnedItemButton(item);
+            var button = CreatePinnedItemButton(item, itemSize);
             Grid.SetRow(button, nextRow);
             Grid.SetColumn(button, nextCol);
             grid.Children.Add(button);
@@ -1443,7 +1424,7 @@ public partial class StartMenuWindow : Window
                 }
             }
 
-            var groupButton = CreateGroupFolderButton(group, currentTabId);
+            var groupButton = CreateGroupFolderButton(group, currentTabId, itemSize);
             Grid.SetRow(groupButton, nextRow);
             Grid.SetColumn(groupButton, nextCol);
             grid.Children.Add(groupButton);
@@ -3118,11 +3099,9 @@ public partial class StartMenuWindow : Window
         CustomWidthTextBox.Text = settings.CustomWidth.ToString();
         CustomHeightTextBox.Text = settings.CustomHeight.ToString();
 
-        // Items Per Row
-        ItemsPerRowSlider.Value = settings.ItemsPerRow;
-        ItemsPerRowLabel.Text = settings.ItemsPerRow == 0 
-            ? "Satır başına öğe: Otomatik" 
-            : $"Satır başına öğe: {settings.ItemsPerRow}";
+        // Item Size
+        ItemSizeSlider.Value = settings.ItemSize;
+        ItemSizeLabel.Text = $"Öğe boyutu: {settings.ItemSize}px";
 
         // Override Windows Key
         OverrideWinKeyCheckBox.IsChecked = settings.OverrideWindowsStartButton;
@@ -3241,15 +3220,13 @@ public partial class StartMenuWindow : Window
         PositionWindow(); // Apply immediately
     }
 
-    private void ItemsPerRowSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    private void ItemSizeSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
-        if (ItemsPerRowLabel != null && _settingsService != null)
+        if (ItemSizeLabel != null && _settingsService != null)
         {
             var value = (int)e.NewValue;
-            ItemsPerRowLabel.Text = value == 0 
-                ? "Satır başına öğe: Otomatik" 
-                : $"Satır başına öğe: {value}";
-            _settingsService.UpdateSetting(nameof(AppSettings.ItemsPerRow), value);
+            ItemSizeLabel.Text = $"Öğe boyutu: {value}px";
+            _settingsService.UpdateSetting(nameof(AppSettings.ItemSize), value);
             RefreshPinnedItems(); // Apply immediately
         }
     }

@@ -50,19 +50,10 @@ public class AppSettings
     public bool OverrideWindowsStartButton { get; set; } = true;
 
     /// <summary>
-    /// Number of items per row in the menu (0 = auto)
+    /// Item size in pixels for the menu grid (default: 80)
+    /// This determines both item button size and grid cell size
     /// </summary>
-    public int ItemsPerRow { get; set; } = 0;
-
-    /// <summary>
-    /// Minimum item size in pixels (default: 60)
-    /// </summary>
-    public int MinItemSize { get; set; } = 60;
-
-    /// <summary>
-    /// Maximum item size in pixels (default: 120)
-    /// </summary>
-    public int MaxItemSize { get; set; } = 120;
+    public int ItemSize { get; set; } = 80;
 
     /// <summary>
     /// Menu size preset

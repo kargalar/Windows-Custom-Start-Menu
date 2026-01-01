@@ -640,22 +640,22 @@
                             </StackPanel>
                         </Border>
 
-                        <!-- Items Per Row -->
+                        <!-- Item Size -->
                         <Border Background="#15FFFFFF" CornerRadius="8" Padding="16" Margin="0,0,0,12">
                             <StackPanel>
-                                <TextBlock x:Name="ItemsPerRowLabel"
-                                           Text="Satır başına öğe: Otomatik"
+                                <TextBlock x:Name="ItemSizeLabel"
+                                           Text="Öğe boyutu: 80px"
                                            FontSize="14"
                                            Foreground="{StaticResource TextBrush}"
                                            Margin="0,0,0,12"/>
-                                <Slider x:Name="ItemsPerRowSlider"
-                                        Minimum="0"
-                                        Maximum="10"
-                                        Value="0"
+                                <Slider x:Name="ItemSizeSlider"
+                                        Minimum="40"
+                                        Maximum="150"
+                                        Value="80"
                                         IsSnapToTickEnabled="True"
-                                        TickFrequency="1"
-                                        ValueChanged="ItemsPerRowSlider_ValueChanged"/>
-                                <TextBlock Text="0 = Otomatik (pencere genişliğine göre)"
+                                        TickFrequency="10"
+                                        ValueChanged="ItemSizeSlider_ValueChanged"/>
+                                <TextBlock Text="Öğe boyutu arttıkça satır başına öğe sayısı azalır"
                                            FontSize="11"
                                            Foreground="{StaticResource TextSecondaryBrush}"
                                            Margin="0,8,0,0"/>
