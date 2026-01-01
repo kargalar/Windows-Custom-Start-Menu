@@ -16,6 +16,11 @@ public class PinnedItem
     public int Order { get; set; }
     
     /// <summary>
+    /// Global order for mixed sorting with groups (used for ungrouped items in ordered layout)
+    /// </summary>
+    public int GlobalOrder { get; set; }
+    
+    /// <summary>
     /// The tab this item belongs to (null = default/first tab)
     /// </summary>
     public string? TabId { get; set; }

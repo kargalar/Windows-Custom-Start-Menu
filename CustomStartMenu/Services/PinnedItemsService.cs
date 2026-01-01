@@ -265,17 +265,115 @@ public class PinnedItemsService : IDisposable
     {
         tabId ??= DefaultTab.Id;
         
+        // Get the max global order from both ungrouped items and groups in this tab
+        var maxGlobalOrder = GetMaxGlobalOrder(tabId);
+        
         var groupsInTab = _groups.Where(g => g.TabId == tabId).ToList();
         var group = new Group
         {
             Name = name,
             TabId = tabId,
-            Order = groupsInTab.Count
+            Order = groupsInTab.Count,
+            GlobalOrder = maxGlobalOrder + 1
         };
         _groups.Add(group);
         Save();
         PinnedItemsChanged?.Invoke(this, EventArgs.Empty);
         return group;
+    }
+    
+    /// <summary>
+    /// Get the maximum GlobalOrder value among ungrouped items and groups in a tab
+    /// </summary>
+    private int GetMaxGlobalOrder(string? tabId)
+    {
+        tabId ??= DefaultTab.Id;
+        
+        var maxItemOrder = _pinnedItems
+            .Where(p => p.TabId == tabId && p.GroupId == null)
+            .Select(p => p.GlobalOrder)
+            .DefaultIfEmpty(-1)
+            .Max();
+            
+        var maxGroupOrder = _groups
+            .Where(g => g.TabId == tabId)
+            .Select(g => g.GlobalOrder)
+            .DefaultIfEmpty(-1)
+            .Max();
+            
+        return Math.Max(maxItemOrder, maxGroupOrder);
+    }
+    
+    /// <summary>
+    /// Get all displayable elements (ungrouped items + groups) sorted by GlobalOrder
+    /// </summary>
+    public List<object> GetSortedElementsForTab(string? tabId)
+    {
+        tabId ??= DefaultTab.Id;
+        
+        var elements = new List<(object Element, int GlobalOrder)>();
+        
+        // Add ungrouped items
+        foreach (var item in _pinnedItems.Where(p => p.TabId == tabId && p.GroupId == null))
+        {
+            elements.Add((item, item.GlobalOrder));
+        }
+        
+        // Add groups
+        foreach (var group in _groups.Where(g => g.TabId == tabId))
+        {
+            elements.Add((group, group.GlobalOrder));
+        }
+        
+        return elements.OrderBy(e => e.GlobalOrder).Select(e => e.Element).ToList();
+    }
+    
+    /// <summary>
+    /// Move an element (item or group) to a new global position
+    /// </summary>
+    public void MoveElementToGlobalPosition(string elementId, bool isGroup, int toGlobalIndex, string? tabId = null)
+    {
+        tabId ??= DefaultTab.Id;
+        
+        // Get all elements sorted by current GlobalOrder
+        var elements = GetSortedElementsForTab(tabId);
+        
+        // Find and remove the element being moved
+        object? movingElement = null;
+        if (isGroup)
+        {
+            movingElement = _groups.FirstOrDefault(g => g.Id == elementId);
+        }
+        else
+        {
+            movingElement = _pinnedItems.FirstOrDefault(p => p.Id == elementId);
+        }
+        
+        if (movingElement == null) return;
+        
+        elements.Remove(movingElement);
+        
+        // Clamp the target index
+        toGlobalIndex = Math.Max(0, Math.Min(toGlobalIndex, elements.Count));
+        
+        // Insert at new position
+        elements.Insert(toGlobalIndex, movingElement);
+        
+        // Update GlobalOrder for all elements
+        for (int i = 0; i < elements.Count; i++)
+        {
+            if (elements[i] is PinnedItem item)
+            {
+                item.GlobalOrder = i;
+            }
+            else if (elements[i] is Group group)
+            {
+                group.GlobalOrder = i;
+            }
+        }
+        
+        Save();
+        PinnedItemsChanged?.Invoke(this, EventArgs.Empty);
     }
 
     public void RenameGroup(string groupId, string newName)
@@ -398,12 +496,20 @@ public class PinnedItemsService : IDisposable
             itemType = PinnedItemType.Application;
         }
 
+        // Calculate GlobalOrder for ungrouped items
+        var globalOrder = 0;
+        if (groupId == null)
+        {
+            globalOrder = GetMaxGlobalOrder(tabId) + 1;
+        }
+
         var item = new PinnedItem
         {
             Path = path,
             Name = Path.GetFileNameWithoutExtension(path) ?? Path.GetFileName(path),
             Type = itemType,
             Order = itemsInContext.Count,
+            GlobalOrder = globalOrder,
             TabId = tabId,
             GroupId = groupId
         };
@@ -489,6 +595,21 @@ public class PinnedItemsService : IDisposable
         {
             item.GridRow = gridRow;
             item.GridColumn = gridColumn;
+            Save();
+            PinnedItemsChanged?.Invoke(this, EventArgs.Empty);
+        }
+    }
+    
+    /// <summary>
+    /// Update grid position for a group (used in FreeForm mode)
+    /// </summary>
+    public void UpdateGroupGridPosition(string groupId, int? gridRow, int? gridColumn)
+    {
+        var group = _groups.FirstOrDefault(g => g.Id == groupId);
+        if (group != null)
+        {
+            group.GridRow = gridRow;
+            group.GridColumn = gridColumn;
             Save();
             PinnedItemsChanged?.Invoke(this, EventArgs.Empty);
         }

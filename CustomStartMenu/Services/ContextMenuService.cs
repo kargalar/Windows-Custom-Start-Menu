@@ -5,30 +5,23 @@ namespace CustomStartMenu.Services;
 
 /// <summary>
 /// Manages Windows Explorer context menu integration.
-/// Adds "Custom Start Menu" submenu with Pin/Unpin options to right-click menu for exe files and folders.
+/// Adds a single "Custom Start Menu" toggle entry to right-click menu for files and folders.
+/// The entry text changes based on whether the item is already pinned or not.
 /// </summary>
 public class ContextMenuService
 {
-    private const string MenuTextPin = "Pinle";
-    private const string MenuTextUnpin = "Kaldır";
-    private const string SubMenuText = "Custom Start Menu";
+    private const string MenuText = "Custom Start Menu";
     
     // Registry keys for .exe files
     private const string RegistryKeyExe = @"SOFTWARE\Classes\exefile\shell\CustomStartMenu";
-    private const string RegistryKeyExePin = @"SOFTWARE\Classes\exefile\shell\CustomStartMenu\shell\Pin";
-    private const string RegistryKeyExeUnpin = @"SOFTWARE\Classes\exefile\shell\CustomStartMenu\shell\Unpin";
     
     // Registry keys for folders
     private const string RegistryKeyFolder = @"SOFTWARE\Classes\Directory\shell\CustomStartMenu";
-    private const string RegistryKeyFolderPin = @"SOFTWARE\Classes\Directory\shell\CustomStartMenu\shell\Pin";
-    private const string RegistryKeyFolderUnpin = @"SOFTWARE\Classes\Directory\shell\CustomStartMenu\shell\Unpin";
     
     // Registry keys for all files (*)
     private const string RegistryKeyAllFiles = @"SOFTWARE\Classes\*\shell\CustomStartMenu";
-    private const string RegistryKeyAllFilesPin = @"SOFTWARE\Classes\*\shell\CustomStartMenu\shell\Pin";
-    private const string RegistryKeyAllFilesUnpin = @"SOFTWARE\Classes\*\shell\CustomStartMenu\shell\Unpin";
 
-    // Legacy keys to clean up
+    // Legacy keys to clean up (old submenu format)
     private const string LegacyRegistryKeyExe = @"SOFTWARE\Classes\exefile\shell\CustomStartMenuPin";
     private const string LegacyRegistryKeyFolder = @"SOFTWARE\Classes\Directory\shell\CustomStartMenuPin";
 
@@ -55,13 +48,13 @@ public class ContextMenuService
             CleanupLegacyEntries();
             
             // Register for .exe files
-            RegisterSubMenuEntry(RegistryKeyExe, RegistryKeyExePin, RegistryKeyExeUnpin, exePath);
+            RegisterSingleMenuEntry(RegistryKeyExe, exePath);
             
             // Register for folders
-            RegisterSubMenuEntry(RegistryKeyFolder, RegistryKeyFolderPin, RegistryKeyFolderUnpin, exePath);
+            RegisterSingleMenuEntry(RegistryKeyFolder, exePath);
             
             // Register for all files (to support .url and other file types)
-            RegisterSubMenuEntry(RegistryKeyAllFiles, RegistryKeyAllFilesPin, RegistryKeyAllFilesUnpin, exePath);
+            RegisterSingleMenuEntry(RegistryKeyAllFiles, exePath);
 
             Debug.WriteLine("Context menu registered successfully");
             return true;
@@ -77,7 +70,7 @@ public class ContextMenuService
     {
         try
         {
-            // Remove new submenu entries
+            // Remove menu entries
             Registry.CurrentUser.DeleteSubKeyTree(RegistryKeyExe, false);
             Registry.CurrentUser.DeleteSubKeyTree(RegistryKeyFolder, false);
             Registry.CurrentUser.DeleteSubKeyTree(RegistryKeyAllFiles, false);
@@ -108,37 +101,19 @@ public class ContextMenuService
         }
     }
 
-    private void RegisterSubMenuEntry(string parentKey, string pinKey, string unpinKey, string exePath)
+    private void RegisterSingleMenuEntry(string registryKey, string exePath)
     {
-        // Create parent submenu
-        using var parentMenuKey = Registry.CurrentUser.CreateSubKey(parentKey);
-        if (parentMenuKey == null) throw new Exception($"Failed to create registry key: {parentKey}");
+        // Create single menu entry (no submenu)
+        using var menuKey = Registry.CurrentUser.CreateSubKey(registryKey);
+        if (menuKey == null) throw new Exception($"Failed to create registry key: {registryKey}");
 
-        parentMenuKey.SetValue("MUIVerb", SubMenuText);
-        parentMenuKey.SetValue("SubCommands", "");
-        parentMenuKey.SetValue("Icon", $"\"{exePath}\"");
+        menuKey.SetValue("", MenuText);
+        menuKey.SetValue("Icon", $"\"{exePath}\"");
 
-        // Create Pin submenu item
-        using var pinMenuKey = Registry.CurrentUser.CreateSubKey(pinKey);
-        if (pinMenuKey == null) throw new Exception($"Failed to create registry key: {pinKey}");
-        
-        pinMenuKey.SetValue("MUIVerb", MenuTextPin);
-        pinMenuKey.SetValue("Icon", $"\"{exePath}\"");
-
-        using var pinCommandKey = pinMenuKey.CreateSubKey("command");
-        if (pinCommandKey == null) throw new Exception("Failed to create Pin command subkey");
-        pinCommandKey.SetValue("", $"\"{exePath}\" --pin \"%1\"");
-
-        // Create Unpin submenu item
-        using var unpinMenuKey = Registry.CurrentUser.CreateSubKey(unpinKey);
-        if (unpinMenuKey == null) throw new Exception($"Failed to create registry key: {unpinKey}");
-        
-        unpinMenuKey.SetValue("MUIVerb", MenuTextUnpin);
-        unpinMenuKey.SetValue("Icon", $"\"{exePath}\"");
-
-        using var unpinCommandKey = unpinMenuKey.CreateSubKey("command");
-        if (unpinCommandKey == null) throw new Exception("Failed to create Unpin command subkey");
-        unpinCommandKey.SetValue("", $"\"{exePath}\" --unpin \"%1\"");
+        // Create command - use --toggle to let the app decide pin or unpin
+        using var commandKey = menuKey.CreateSubKey("command");
+        if (commandKey == null) throw new Exception("Failed to create command subkey");
+        commandKey.SetValue("", $"\"{exePath}\" --toggle \"%1\"");
     }
 
     private string GetExecutablePath()

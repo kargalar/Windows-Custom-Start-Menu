@@ -316,8 +316,8 @@
 
             <!-- Header with Tabs -->
             <Grid Grid.Row="0" Margin="0,0,0,8">
-                <!-- Tab Bar -->
-                <Grid>
+                <!-- Tab Bar (shown in normal view) -->
+                <Grid x:Name="TabBarPanel">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"/>
                         <ColumnDefinition Width="Auto"/>
@@ -332,10 +332,35 @@
                     </ScrollViewer>
 
                     <!-- Add Tab Button -->
-                    <Button Grid.Column="1" 
+                    <Button x:Name="AddTabButton"
+                            Grid.Column="1" 
                             Style="{StaticResource AddTabButtonStyle}"
                             Click="AddTab_Click"
                             Margin="8,0,0,0"/>
+                </Grid>
+
+                <!-- Close Button Header (shown in settings/search view) -->
+                <Grid x:Name="CloseButtonHeader" Visibility="Collapsed">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    
+                    <TextBlock x:Name="ViewTitleText"
+                               Grid.Column="0"
+                               Text="Ayarlar"
+                               FontSize="20"
+                               FontWeight="SemiBold"
+                               Foreground="{StaticResource TextBrush}"
+                               VerticalAlignment="Center"/>
+                    
+                    <Button x:Name="CloseViewButton"
+                            Grid.Column="1"
+                            Style="{StaticResource AddTabButtonStyle}"
+                            Click="CloseViewButton_Click"
+                            ToolTip="Kapat">
+                        <TextBlock Text="✕" FontSize="14" FontWeight="Bold"/>
+                    </Button>
                 </Grid>
 
                 <!-- Tab separator line -->
@@ -428,30 +453,6 @@
             <Grid x:Name="SettingsView" Grid.Row="1" Visibility="Collapsed">
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                     <StackPanel Margin="0,0,0,16">
-                        <!-- Settings Header with Back Button -->
-                        <Grid Margin="0,0,0,20">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto"/>
-                                <ColumnDefinition Width="*"/>
-                            </Grid.ColumnDefinitions>
-                            
-                            <Button x:Name="SettingsBackButton"
-                                    Grid.Column="0"
-                                    Style="{StaticResource MenuButtonStyle}"
-                                    Click="SettingsBackButton_Click"
-                                    ToolTip="Geri"
-                                    Margin="0,0,12,0">
-                                <TextBlock Text="←" FontSize="20"/>
-                            </Button>
-                            
-                            <TextBlock Grid.Column="1"
-                                       Text="Ayarlar"
-                                       FontSize="20"
-                                       FontWeight="SemiBold"
-                                       Foreground="{StaticResource TextBrush}"
-                                       VerticalAlignment="Center"/>
-                        </Grid>
-
                         <!-- Show Icons Only Toggle -->
                         <Border Background="#15FFFFFF" CornerRadius="8" Padding="16" Margin="0,0,0,12">
                             <Grid>
@@ -584,8 +585,10 @@
                                            Margin="0,0,0,12"/>
                                 <ComboBox x:Name="SizeComboBox"
                                           SelectionChanged="SizeComboBox_SelectionChanged">
+                                    <ComboBoxItem Content="Küçük (500x600)" Tag="Small"/>
                                     <ComboBoxItem Content="Normal (650x750)" Tag="Normal"/>
                                     <ComboBoxItem Content="Büyük (900x850)" Tag="Large"/>
+                                    <ComboBoxItem Content="Çok Büyük (1100x950)" Tag="VeryLarge"/>
                                     <ComboBoxItem Content="Tam Ekran" Tag="Fullscreen"/>
                                     <ComboBoxItem Content="Özel" Tag="Custom"/>
                                 </ComboBox>

@@ -133,8 +133,10 @@ public enum MenuPosition
 /// </summary>
 public enum MenuSize
 {
+    Small,      // 500x600
     Normal,     // 650x750
     Large,      // 900x850
+    VeryLarge,  // 1100x950
     Fullscreen, // Screen dimensions
     Custom      // User-defined
 }

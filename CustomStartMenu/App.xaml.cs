@@ -1,3 +1,4 @@
+using System.Threading;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
@@ -10,6 +11,9 @@ namespace CustomStartMenu;
 
 public partial class App : Application
 {
+    private static Mutex? _mutex;
+    private const string MutexName = "CustomStartMenu_SingleInstance_Mutex";
+    
     private TaskbarIcon? _trayIcon;
     private StartMenuWindow? _startMenuWindow;
     private KeyboardHookService? _keyboardHookService;
@@ -31,6 +35,16 @@ public partial class App : Application
 
     protected override void OnStartup(StartupEventArgs e)
     {
+        // Check for single instance
+        _mutex = new Mutex(true, MutexName, out bool isNewInstance);
+        
+        if (!isNewInstance)
+        {
+            // Another instance is already running, exit silently
+            Shutdown();
+            return;
+        }
+        
         base.OnStartup(e);
 
         // Check for --pin or --unpin argument (from context menu)
@@ -331,6 +345,10 @@ public partial class App : Application
         _settingsService?.Dispose();
         _trayIcon?.Dispose();
         _startMenuWindow?.Close();
+        
+        // Release mutex
+        _mutex?.ReleaseMutex();
+        _mutex?.Dispose();
 
         base.OnExit(e);
     }

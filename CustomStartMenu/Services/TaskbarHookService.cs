@@ -1,7 +1,6 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Windows;
-using System.Windows.Automation;
 
 namespace CustomStartMenu.Services;
 
@@ -36,6 +35,21 @@ public class TaskbarHookService : IDisposable
     [DllImport("user32.dll")]
     private static extern bool SetForegroundWindow(IntPtr hWnd);
 
+    [DllImport("user32.dll")]
+    private static extern bool PostMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+    [DllImport("user32.dll")]
+    private static extern bool IsWindowVisible(IntPtr hWnd);
+
+    [DllImport("user32.dll", CharSet = CharSet.Auto)]
+    private static extern int GetClassName(IntPtr hWnd, System.Text.StringBuilder lpClassName, int nMaxCount);
+
+    [DllImport("user32.dll")]
+    private static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
+
     [StructLayout(LayoutKind.Sequential)]
     private struct RECT
     {
@@ -47,8 +61,16 @@ public class TaskbarHookService : IDisposable
         int idChild, uint dwEventThread, uint dwmsEventTime);
 
     private const uint EVENT_SYSTEM_FOREGROUND = 0x0003;
+    private const uint EVENT_OBJECT_SHOW = 0x8002;
     private const uint WINEVENT_OUTOFCONTEXT = 0x0000;
     private const uint WINEVENT_SKIPOWNPROCESS = 0x0002;
+    private const uint WM_CLOSE = 0x0010;
+    private const int SW_HIDE = 0;
+    
+    // Virtual key codes
+    private const byte VK_ESCAPE = 0x1B;
+    private const uint KEYEVENTF_KEYDOWN = 0x0000;
+    private const uint KEYEVENTF_KEYUP = 0x0002;
 
     #endregion
 
@@ -89,7 +111,7 @@ public class TaskbarHookService : IDisposable
 
         _winEventDelegate = WinEventProc;
         _winEventHook = SetWinEventHook(
-            EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND,
+            EVENT_SYSTEM_FOREGROUND, EVENT_OBJECT_SHOW,
             IntPtr.Zero, _winEventDelegate,
             0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
 
@@ -122,26 +144,51 @@ public class TaskbarHookService : IDisposable
 
         try
         {
-            // Check if Windows Start Menu is being activated
-            // The Start Menu window has class name "Windows.UI.Core.CoreWindow"
-            // and contains "Start" in certain scenarios
+            // Get window class name
+            var className = new System.Text.StringBuilder(256);
+            GetClassName(hwnd, className, className.Capacity);
+            var classNameStr = className.ToString();
 
-            // Check if it's the Start menu being opened
-            var startMenuHwnd = FindStartMenuWindow();
-            if (startMenuHwnd != IntPtr.Zero && hwnd == startMenuHwnd)
+            // Detect Windows 10/11 Start Menu windows
+            bool isStartMenu = false;
+            
+            // Windows 11 Start menu uses "Windows.UI.Core.CoreWindow" with "Start" title
+            if (classNameStr == "Windows.UI.Core.CoreWindow")
+            {
+                var startMenuHwnd = FindWindow("Windows.UI.Core.CoreWindow", "Start");
+                if (hwnd == startMenuHwnd && IsWindowVisible(hwnd))
+                {
+                    isStartMenu = true;
+                }
+                
+                // Turkish locale
+                if (!isStartMenu)
+                {
+                    startMenuHwnd = FindWindow("Windows.UI.Core.CoreWindow", "Başlat");
+                    if (hwnd == startMenuHwnd && IsWindowVisible(hwnd))
+                    {
+                        isStartMenu = true;
+                    }
+                }
+            }
+
+            if (isStartMenu)
             {
                 // Debounce to prevent multiple triggers
                 if ((DateTime.Now - _lastTriggerTime).TotalMilliseconds < DEBOUNCE_MS)
                     return;
 
                 _lastTriggerTime = DateTime.Now;
-                Debug.WriteLine("Start menu activation detected - intercepting");
+                Debug.WriteLine($"Start menu detected - intercepting (class: {classNameStr})");
 
-                // Hide the Windows Start Menu and show our custom menu
+                // Close Windows Start Menu immediately
+                CloseWindowsStartMenu();
+
+                // Show our custom menu
                 Application.Current?.Dispatcher.InvokeAsync(() =>
                 {
-                    // Give it a moment then trigger our menu
-                    Task.Delay(50).ContinueWith(_ =>
+                    // Small delay to ensure Windows start menu is closed
+                    Task.Delay(100).ContinueWith(_ =>
                     {
                         Application.Current?.Dispatcher.Invoke(() =>
                         {
@@ -157,10 +204,43 @@ public class TaskbarHookService : IDisposable
         }
     }
 
+    /// <summary>
+    /// Close the Windows Start Menu by sending Escape key
+    /// </summary>
+    private void CloseWindowsStartMenu()
+    {
+        try
+        {
+            // Find and hide the Start Menu window
+            var startMenuHwnd = FindWindow("Windows.UI.Core.CoreWindow", "Start");
+            if (startMenuHwnd == IntPtr.Zero)
+                startMenuHwnd = FindWindow("Windows.UI.Core.CoreWindow", "Başlat");
+
+            if (startMenuHwnd != IntPtr.Zero && IsWindowVisible(startMenuHwnd))
+            {
+                // Try to hide the window directly
+                ShowWindow(startMenuHwnd, SW_HIDE);
+                Debug.WriteLine("Windows Start Menu hidden");
+            }
+
+            // Also send Escape key to close any remaining UI
+            keybd_event(VK_ESCAPE, 0, KEYEVENTF_KEYDOWN, UIntPtr.Zero);
+            keybd_event(VK_ESCAPE, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Error closing Windows Start Menu: {ex.Message}");
+        }
+    }
+
     private IntPtr FindStartMenuWindow()
     {
         // Windows 11 Start Menu window
         var hwnd = FindWindow("Windows.UI.Core.CoreWindow", "Start");
+        if (hwnd != IntPtr.Zero) return hwnd;
+        
+        // Turkish locale
+        hwnd = FindWindow("Windows.UI.Core.CoreWindow", "Başlat");
         if (hwnd != IntPtr.Zero) return hwnd;
 
         // Try alternative class names
