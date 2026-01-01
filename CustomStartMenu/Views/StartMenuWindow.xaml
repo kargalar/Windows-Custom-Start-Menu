@@ -586,8 +586,10 @@
                                            Margin="0,0,0,12"/>
                                 <ComboBox x:Name="SizeComboBox"
                                           SelectionChanged="SizeComboBox_SelectionChanged">
+                                    <ComboBoxItem Content="Küçük (500x600)" Tag="Small"/>
                                     <ComboBoxItem Content="Normal (650x750)" Tag="Normal"/>
                                     <ComboBoxItem Content="Büyük (900x850)" Tag="Large"/>
+                                    <ComboBoxItem Content="Çok Büyük (1100x950)" Tag="VeryLarge"/>
                                     <ComboBoxItem Content="Tam Ekran" Tag="Fullscreen"/>
                                     <ComboBoxItem Content="Özel" Tag="Custom"/>
                                 </ComboBox>

@@ -218,6 +218,12 @@ public partial class StartMenuWindow : Window
 
         switch (settings.Size)
         {
+            case MenuSize.Small:
+                Width = 500;
+                Height = 600;
+                WindowState = WindowState.Normal;
+                break;
+
             case MenuSize.Normal:
                 Width = 650;
                 Height = 750;
@@ -227,6 +233,12 @@ public partial class StartMenuWindow : Window
             case MenuSize.Large:
                 Width = 900;
                 Height = 850;
+                WindowState = WindowState.Normal;
+                break;
+
+            case MenuSize.VeryLarge:
+                Width = 1100;
+                Height = 950;
                 WindowState = WindowState.Normal;
                 break;
 
@@ -2979,11 +2991,13 @@ public partial class StartMenuWindow : Window
         // Size
         SizeComboBox.SelectedIndex = settings.Size switch
         {
-            MenuSize.Normal => 0,
-            MenuSize.Large => 1,
-            MenuSize.Fullscreen => 2,
-            MenuSize.Custom => 3,
-            _ => 0
+            MenuSize.Small => 0,
+            MenuSize.Normal => 1,
+            MenuSize.Large => 2,
+            MenuSize.VeryLarge => 3,
+            MenuSize.Fullscreen => 4,
+            MenuSize.Custom => 5,
+            _ => 1
         };
         CustomSizePanel.Visibility = settings.Size == MenuSize.Custom ? Visibility.Visible : Visibility.Collapsed;
         CustomWidthTextBox.Text = settings.CustomWidth.ToString();
@@ -3084,8 +3098,10 @@ public partial class StartMenuWindow : Window
         {
             var size = sizeStr switch
             {
+                "Small" => MenuSize.Small,
                 "Normal" => MenuSize.Normal,
                 "Large" => MenuSize.Large,
+                "VeryLarge" => MenuSize.VeryLarge,
                 "Fullscreen" => MenuSize.Fullscreen,
                 "Custom" => MenuSize.Custom,
                 _ => MenuSize.Normal
