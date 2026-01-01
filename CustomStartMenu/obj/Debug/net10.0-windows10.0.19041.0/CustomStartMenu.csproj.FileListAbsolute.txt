@@ -7,8 +7,6 @@ C:\KARGALAR\Projeler\Windows\windows\CustomStartMenu\bin\Debug\net10.0-windows10
 C:\KARGALAR\Projeler\Windows\windows\CustomStartMenu\bin\Debug\net10.0-windows10.0.19041.0\Microsoft.Windows.SDK.NET.dll
 C:\KARGALAR\Projeler\Windows\windows\CustomStartMenu\bin\Debug\net10.0-windows10.0.19041.0\WinRT.Runtime.dll
 C:\KARGALAR\Projeler\Windows\windows\CustomStartMenu\obj\Debug\net10.0-windows10.0.19041.0\CustomStartMenu.csproj.AssemblyReference.cache
-C:\KARGALAR\Projeler\Windows\windows\CustomStartMenu\obj\Debug\net10.0-windows10.0.19041.0\Views\StartMenuWindow.baml
-C:\KARGALAR\Projeler\Windows\windows\CustomStartMenu\obj\Debug\net10.0-windows10.0.19041.0\Views\StartMenuWindow.g.cs
 C:\KARGALAR\Projeler\Windows\windows\CustomStartMenu\obj\Debug\net10.0-windows10.0.19041.0\App.g.cs
 C:\KARGALAR\Projeler\Windows\windows\CustomStartMenu\obj\Debug\net10.0-windows10.0.19041.0\CustomStartMenu_MarkupCompile.cache
 C:\KARGALAR\Projeler\Windows\windows\CustomStartMenu\obj\Debug\net10.0-windows10.0.19041.0\CustomStartMenu_MarkupCompile.lref
@@ -24,3 +22,5 @@ C:\KARGALAR\Projeler\Windows\windows\CustomStartMenu\obj\Debug\net10.0-windows10
 C:\KARGALAR\Projeler\Windows\windows\CustomStartMenu\obj\Debug\net10.0-windows10.0.19041.0\CustomStartMenu.pdb
 C:\KARGALAR\Projeler\Windows\windows\CustomStartMenu\obj\Debug\net10.0-windows10.0.19041.0\CustomStartMenu.genruntimeconfig.cache
 C:\KARGALAR\Projeler\Windows\windows\CustomStartMenu\obj\Debug\net10.0-windows10.0.19041.0\ref\CustomStartMenu.dll
+C:\KARGALAR\Projeler\Windows\windows\CustomStartMenu\obj\Debug\net10.0-windows10.0.19041.0\Views\StartMenuWindow\StartMenuWindow.baml
+C:\KARGALAR\Projeler\Windows\windows\CustomStartMenu\obj\Debug\net10.0-windows10.0.19041.0\Views\StartMenuWindow\StartMenuWindow.g.cs
