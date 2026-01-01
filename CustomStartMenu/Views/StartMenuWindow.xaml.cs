@@ -86,6 +86,11 @@ public partial class StartMenuWindow : Window
     private TextBlock? _activeRenameTextBlock;
     private PinnedItem? _renamingItem;
 
+    // Inline tab edit (new tab name / rename tab)
+    private TextBox? _activeTabEditTextBox;
+    private Button? _activeTabEditButton;
+    private string? _activeTabEditTabId;
+
     public StartMenuWindow()
     {
         InitializeComponent();
@@ -408,6 +413,12 @@ public partial class StartMenuWindow : Window
             return;
         }
         
+        // Don't switch to search mode while typing into any TextBox (e.g., inline rename/new tab name)
+        if (FocusManager.GetFocusedElement(this) is TextBox)
+        {
+            return;
+        }
+        
         // Don't switch to search mode if inline rename is active
         if (_activeRenameTextBox != null)
         {
@@ -467,8 +478,8 @@ public partial class StartMenuWindow : Window
 
     private void Window_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
     {
-        // Switch tabs with mouse wheel when not in search mode
-        if (!_isInSearchMode && !IsMouseOverScrollableContent())
+        // Switch tabs with mouse wheel when not in search mode and not in settings view
+        if (!_isInSearchMode && !IsMouseOverScrollableContent() && SettingsView.Visibility != Visibility.Visible)
         {
             var tabs = _pinnedItemsService.Tabs.OrderBy(t => t.Order).ToList();
             var currentIndex = tabs.FindIndex(t => t.Id == _currentTabId);
@@ -524,6 +535,11 @@ public partial class StartMenuWindow : Window
         SearchResultsPanel.Items.Clear();
         SearchingText.Visibility = Visibility.Collapsed;
         NoResultsText.Visibility = Visibility.Collapsed;
+        
+        // Hide tabs and show close button header with Arama title
+        TabBarPanel.Visibility = Visibility.Collapsed;
+        CloseButtonHeader.Visibility = Visibility.Visible;
+        ViewTitleText.Text = "Arama";
     }
 
     private void SwitchToPinnedView()
@@ -540,6 +556,10 @@ public partial class StartMenuWindow : Window
         SettingsView.Visibility = Visibility.Collapsed;
         PinnedItemsView.Visibility = Visibility.Visible;
         _searchCts?.Cancel();
+        
+        // Show tabs and hide close button header
+        TabBarPanel.Visibility = Visibility.Visible;
+        CloseButtonHeader.Visibility = Visibility.Collapsed;
     }
 
     #region Tab Management
@@ -618,7 +638,7 @@ public partial class StartMenuWindow : Window
         var contextMenu = new ContextMenu();
 
         var renameItem = new MenuItem { Header = "Yeniden Adlandır" };
-        renameItem.Click += (s, e) => ShowRenameTabDialog(tab);
+        renameItem.Click += (s, e) => StartInlineTabEdit(tab, button);
 
         var deleteItem = new MenuItem { Header = "Sekmeyi Sil" };
         deleteItem.Click += (s, e) =>
@@ -657,91 +677,176 @@ public partial class StartMenuWindow : Window
         contextMenu.IsOpen = true;
     }
 
-    private void ShowRenameTabDialog(Tab tab)
+    private void StartInlineTabEdit(Tab tab, Button tabButton)
     {
-        var dialog = new Window
-        {
-            Title = "Sekmeyi Yeniden Adlandır",
-            Width = 300,
-            Height = 120,
-            WindowStartupLocation = WindowStartupLocation.CenterScreen,
-            WindowStyle = WindowStyle.ToolWindow,
-            ResizeMode = ResizeMode.NoResize
-        };
-
-        var panel = new StackPanel { Margin = new Thickness(16) };
-        var textBox = new TextBox { Text = tab.Name, Margin = new Thickness(0, 0, 0, 12) };
-        var buttonPanel = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
+        // Cancel any pinned-item inline rename first
+        CancelInlineRename();
         
-        var okButton = new Button { Content = "Tamam", Width = 75, Margin = new Thickness(0, 0, 8, 0) };
-        var cancelButton = new Button { Content = "İptal", Width = 75 };
-
-        okButton.Click += (s, e) =>
+        // Cancel any existing tab edit
+        CancelInlineTabEdit();
+        
+        if (TabBarPanel.Visibility != Visibility.Visible)
         {
-            if (!string.IsNullOrWhiteSpace(textBox.Text))
-            {
-                _pinnedItemsService.RenameTab(tab.Id, textBox.Text);
-                dialog.Close();
-            }
+            return;
+        }
+        
+        if (tabButton.Content is not TextBlock)
+        {
+            return;
+        }
+        
+        var textBox = new TextBox
+        {
+            Text = tab.Name,
+            MinWidth = 80,
+            MaxWidth = 150,
+            Padding = new Thickness(8, 6, 8, 6),
+            Background = new SolidColorBrush(Color.FromArgb(40, 255, 255, 255)),
+            Foreground = (Brush)FindResource("TextBrush"),
+            BorderBrush = (Brush)FindResource("AccentBrush"),
+            BorderThickness = new Thickness(1),
+            CaretBrush = (Brush)FindResource("TextBrush"),
+            VerticalContentAlignment = VerticalAlignment.Center
         };
-
-        cancelButton.Click += (s, e) => dialog.Close();
-
-        buttonPanel.Children.Add(okButton);
-        buttonPanel.Children.Add(cancelButton);
-        panel.Children.Add(textBox);
-        panel.Children.Add(buttonPanel);
-        dialog.Content = panel;
-
+        
+        _activeTabEditTextBox = textBox;
+        _activeTabEditButton = tabButton;
+        _activeTabEditTabId = tab.Id;
+        
+        tabButton.Content = textBox;
         textBox.SelectAll();
         textBox.Focus();
-
-        dialog.ShowDialog();
+        
+        textBox.KeyDown += TabEditTextBox_KeyDown;
+        textBox.LostFocus += TabEditTextBox_LostFocus;
+    }
+    
+    private void TabEditTextBox_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter)
+        {
+            CommitInlineTabEdit();
+            e.Handled = true;
+        }
+        else if (e.Key == Key.Escape)
+        {
+            CancelInlineTabEdit();
+            e.Handled = true;
+        }
+    }
+    
+    private void TabEditTextBox_LostFocus(object sender, RoutedEventArgs e)
+    {
+        CommitInlineTabEdit();
+    }
+    
+    private void CommitInlineTabEdit()
+    {
+        if (_activeTabEditTextBox == null)
+        {
+            return;
+        }
+        
+        var newName = _activeTabEditTextBox.Text.Trim();
+        if (!string.IsNullOrWhiteSpace(newName) && !string.IsNullOrWhiteSpace(_activeTabEditTabId))
+        {
+            _pinnedItemsService.RenameTab(_activeTabEditTabId, newName);
+        }
+        
+        CancelInlineTabEdit(refresh: true);
+    }
+    
+    private void CancelInlineTabEdit(bool refresh = false)
+    {
+        if (_activeTabEditTextBox != null)
+        {
+            _activeTabEditTextBox.KeyDown -= TabEditTextBox_KeyDown;
+            _activeTabEditTextBox.LostFocus -= TabEditTextBox_LostFocus;
+        }
+        
+        _activeTabEditTextBox = null;
+        _activeTabEditButton = null;
+        _activeTabEditTabId = null;
+        
+        if (refresh)
+        {
+            RefreshTabs();
+            RefreshPinnedItems();
+        }
+        else
+        {
+            RefreshTabs();
+        }
     }
 
     private void AddTab_Click(object sender, RoutedEventArgs e)
     {
-        var dialog = new Window
-        {
-            Title = "Yeni Sekme",
-            Width = 300,
-            Height = 120,
-            WindowStartupLocation = WindowStartupLocation.CenterScreen,
-            WindowStyle = WindowStyle.ToolWindow,
-            ResizeMode = ResizeMode.NoResize
-        };
-
-        var panel = new StackPanel { Margin = new Thickness(16) };
-        var textBox = new TextBox { Text = "Yeni Sekme", Margin = new Thickness(0, 0, 0, 12) };
-        var buttonPanel = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
+        // Cancel any existing tab edit
+        CancelInlineTabEdit();
         
-        var okButton = new Button { Content = "Ekle", Width = 75, Margin = new Thickness(0, 0, 8, 0) };
-        var cancelButton = new Button { Content = "İptal", Width = 75 };
-
-        okButton.Click += (s, args) =>
+        // Create inline TextBox for new tab name
+        var textBox = new TextBox
         {
-            if (!string.IsNullOrWhiteSpace(textBox.Text))
-            {
-                var newTab = _pinnedItemsService.AddTab(textBox.Text);
-                _currentTabId = newTab.Id;
-                RefreshTabs();
-                RefreshPinnedItems();
-                dialog.Close();
-            }
+            Text = "Yeni Sekme",
+            MinWidth = 80,
+            MaxWidth = 150,
+            Padding = new Thickness(8, 6, 8, 6),
+            Background = new SolidColorBrush(Color.FromArgb(40, 255, 255, 255)),
+            Foreground = (Brush)FindResource("TextBrush"),
+            BorderBrush = (Brush)FindResource("AccentBrush"),
+            BorderThickness = new Thickness(1),
+            CaretBrush = (Brush)FindResource("TextBrush"),
+            VerticalContentAlignment = VerticalAlignment.Center
         };
-
-        cancelButton.Click += (s, args) => dialog.Close();
-
-        buttonPanel.Children.Add(okButton);
-        buttonPanel.Children.Add(cancelButton);
-        panel.Children.Add(textBox);
-        panel.Children.Add(buttonPanel);
-        dialog.Content = panel;
-
+        
+        // Add to tabs panel
+        TabsPanel.Children.Add(textBox);
+        _activeTabEditTextBox = textBox;
         textBox.SelectAll();
         textBox.Focus();
-
-        dialog.ShowDialog();
+        
+        // Handle Enter key to confirm
+        textBox.KeyDown += (s, args) =>
+        {
+            if (args.Key == Key.Enter)
+            {
+                var name = textBox.Text.Trim();
+                if (!string.IsNullOrWhiteSpace(name))
+                {
+                    var newTab = _pinnedItemsService.AddTab(name);
+                    _currentTabId = newTab.Id;
+                }
+                TabsPanel.Children.Remove(textBox);
+                _activeTabEditTextBox = null;
+                RefreshTabs();
+                RefreshPinnedItems();
+                args.Handled = true;
+            }
+            else if (args.Key == Key.Escape)
+            {
+                TabsPanel.Children.Remove(textBox);
+                _activeTabEditTextBox = null;
+                args.Handled = true;
+            }
+        };
+        
+        // Handle lost focus to confirm or cancel
+        textBox.LostFocus += (s, args) =>
+        {
+            if (TabsPanel.Children.Contains(textBox))
+            {
+                var name = textBox.Text.Trim();
+                if (!string.IsNullOrWhiteSpace(name))
+                {
+                    var newTab = _pinnedItemsService.AddTab(name);
+                    _currentTabId = newTab.Id;
+                }
+                TabsPanel.Children.Remove(textBox);
+                _activeTabEditTextBox = null;
+                RefreshTabs();
+                RefreshPinnedItems();
+            }
+        };
     }
 
     #endregion
@@ -2961,8 +3066,18 @@ public partial class StartMenuWindow : Window
         SettingsView.Visibility = Visibility.Visible;
         _isInSearchMode = false;
         
+        // Hide tabs and show close button header with Ayarlar title
+        TabBarPanel.Visibility = Visibility.Collapsed;
+        CloseButtonHeader.Visibility = Visibility.Visible;
+        ViewTitleText.Text = "Ayarlar";
+        
         // Load current settings into controls
         LoadSettingsIntoControls();
+    }
+
+    private void CloseViewButton_Click(object sender, RoutedEventArgs e)
+    {
+        SwitchToPinnedView();
     }
 
     private void LoadSettingsIntoControls()
