@@ -1,0 +1,39 @@
+<Application x:Class="CustomStartMenu.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:tb="http://www.hardcodet.net/taskbar"
+             ShutdownMode="OnExplicitShutdown">
+    <Application.Resources>
+        <ResourceDictionary>
+            <!-- Tray Icon -->
+            <tb:TaskbarIcon x:Key="TrayIcon"
+                            IconSource="/Assets/icon.ico"
+                            ToolTipText="Custom Start Menu"
+                            DoubleClickCommand="{x:Static local:App.ShowMenuCommand}"
+                            xmlns:local="clr-namespace:CustomStartMenu">
+                <tb:TaskbarIcon.ContextMenu>
+                    <ContextMenu>
+                        <MenuItem Header="Menüyü Aç" Click="TrayMenu_Open_Click" FontWeight="Bold"/>
+                        <Separator/>
+                        <MenuItem Header="Windows ile Başlat" x:Name="StartupMenuItem" IsCheckable="True" Click="TrayMenu_Startup_Click"/>
+                        <Separator/>
+                        <MenuItem Header="Çıkış" Click="TrayMenu_Exit_Click"/>
+                    </ContextMenu>
+                </tb:TaskbarIcon.ContextMenu>
+            </tb:TaskbarIcon>
+
+            <!-- Colors -->
+            <Color x:Key="MenuBackgroundColor">#E6202020</Color>
+            <Color x:Key="MenuBorderColor">#404040</Color>
+            <Color x:Key="AccentColor">#0078D4</Color>
+            <Color x:Key="TextColor">#FFFFFF</Color>
+            <Color x:Key="TextSecondaryColor">#A0A0A0</Color>
+
+            <SolidColorBrush x:Key="MenuBackgroundBrush" Color="{StaticResource MenuBackgroundColor}"/>
+            <SolidColorBrush x:Key="MenuBorderBrush" Color="{StaticResource MenuBorderColor}"/>
+            <SolidColorBrush x:Key="AccentBrush" Color="{StaticResource AccentColor}"/>
+            <SolidColorBrush x:Key="TextBrush" Color="{StaticResource TextColor}"/>
+            <SolidColorBrush x:Key="TextSecondaryBrush" Color="{StaticResource TextSecondaryColor}"/>
+        </ResourceDictionary>
+    </Application.Resources>
+</Application>
