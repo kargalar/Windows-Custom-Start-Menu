@@ -12,6 +12,8 @@ public partial class App : Application
     private StartMenuWindow? _startMenuWindow;
     private KeyboardHookService? _keyboardHookService;
     private StartupService? _startupService;
+    private ContextMenuService? _contextMenuService;
+    private PinnedItemsService? _pinnedItemsService;
 
     public static RoutedCommand ShowMenuCommand { get; } = new();
 
@@ -19,12 +21,31 @@ public partial class App : Application
 
     public bool IsMenuVisible => _startMenuWindow?.IsVisible ?? false;
 
+    public PinnedItemsService PinnedItemsService => _pinnedItemsService!;
+
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
 
+        // Check for --pin argument (from context menu)
+        var args = e.Args;
+        if (args.Length >= 2 && args[0] == "--pin")
+        {
+            var pathToPin = args[1];
+            HandlePinFromContextMenu(pathToPin);
+            return;
+        }
+
         // Initialize services
         _startupService = new StartupService();
+        _contextMenuService = new ContextMenuService();
+        _pinnedItemsService = new PinnedItemsService();
+
+        // Register context menu if not already
+        if (!_contextMenuService.IsContextMenuRegistered())
+        {
+            _contextMenuService.RegisterContextMenu();
+        }
 
         // Create the start menu window (hidden initially)
         _startMenuWindow = new StartMenuWindow();
@@ -40,6 +61,29 @@ public partial class App : Application
         _keyboardHookService = new KeyboardHookService();
         _keyboardHookService.WindowsKeyPressed += OnWindowsKeyPressed;
         _keyboardHookService.StartHook();
+    }
+
+    private void HandlePinFromContextMenu(string path)
+    {
+        try
+        {
+            // Initialize pinned items service just to add the pin
+            // The FileSystemWatcher in the running instance will detect the change
+            var pinnedService = new PinnedItemsService();
+            pinnedService.AddPin(path);
+            pinnedService.Dispose();
+
+            // Show notification or just exit
+            System.Diagnostics.Debug.WriteLine($"Pinned: {path}");
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Failed to pin: {ex.Message}");
+        }
+        finally
+        {
+            Shutdown();
+        }
     }
 
     private void OnWindowsKeyPressed(object? sender, EventArgs e)
