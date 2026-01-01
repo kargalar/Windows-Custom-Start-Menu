@@ -1,5 +1,7 @@
 using System.Windows;
 using System.Windows.Input;
+using System.Windows.Media;
+using CustomStartMenu.Models;
 using CustomStartMenu.Services;
 using CustomStartMenu.Views;
 using Hardcodet.Wpf.TaskbarNotification;
@@ -11,9 +13,11 @@ public partial class App : Application
     private TaskbarIcon? _trayIcon;
     private StartMenuWindow? _startMenuWindow;
     private KeyboardHookService? _keyboardHookService;
+    private TaskbarHookService? _taskbarHookService;
     private StartupService? _startupService;
     private ContextMenuService? _contextMenuService;
     private PinnedItemsService? _pinnedItemsService;
+    private SettingsService? _settingsService;
 
     public static RoutedCommand ShowMenuCommand { get; } = new();
 
@@ -22,30 +26,60 @@ public partial class App : Application
     public bool IsMenuVisible => _startMenuWindow?.IsVisible ?? false;
 
     public PinnedItemsService PinnedItemsService => _pinnedItemsService!;
+    public SettingsService SettingsService => _settingsService!;
+    public KeyboardHookService KeyboardHookService => _keyboardHookService!;
 
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
 
-        // Check for --pin argument (from context menu)
+        // Check for --pin or --unpin argument (from context menu)
         var args = e.Args;
-        if (args.Length >= 2 && args[0] == "--pin")
+        if (args.Length >= 2)
         {
-            var pathToPin = args[1];
-            HandlePinFromContextMenu(pathToPin);
-            return;
+            if (args[0] == "--pin")
+            {
+                var pathToPin = args[1];
+                HandlePinFromContextMenu(pathToPin);
+                return;
+            }
+            else if (args[0] == "--unpin")
+            {
+                var pathToUnpin = args[1];
+                HandleUnpinFromContextMenu(pathToUnpin);
+                return;
+            }
+            else if (args[0] == "--check-pinned")
+            {
+                // Used by context menu to check if item is pinned
+                var pathToCheck = args[1];
+                CheckPinnedStatus(pathToCheck);
+                return;
+            }
         }
 
         // Initialize services
+        _settingsService = new SettingsService();
         _startupService = new StartupService();
         _contextMenuService = new ContextMenuService();
         _pinnedItemsService = new PinnedItemsService();
+
+        // Apply saved theme color
+        ApplyThemeColor(_settingsService.Settings.AccentColor);
 
         // Register context menu if not already
         if (!_contextMenuService.IsContextMenuRegistered())
         {
             _contextMenuService.RegisterContextMenu();
         }
+
+        // Setup keyboard hook (must be before StartMenuWindow creation)
+        _keyboardHookService = new KeyboardHookService();
+        _keyboardHookService.UpdateHotkey(
+            _settingsService.Settings.OpenMenuHotkey,
+            _settingsService.Settings.OverrideWindowsStartButton);
+        _keyboardHookService.HotkeyPressed += OnHotkeyPressed;
+        _keyboardHookService.StartHook();
 
         // Create the start menu window (hidden initially)
         _startMenuWindow = new StartMenuWindow();
@@ -57,10 +91,56 @@ public partial class App : Application
         // Update startup menu item
         UpdateStartupMenuItem();
 
-        // Setup keyboard hook
-        _keyboardHookService = new KeyboardHookService();
-        _keyboardHookService.WindowsKeyPressed += OnWindowsKeyPressed;
-        _keyboardHookService.StartHook();
+        // Setup taskbar hook for Start button clicks
+        _taskbarHookService = new TaskbarHookService();
+        _taskbarHookService.StartButtonClicked += OnStartButtonClicked;
+        if (_settingsService.Settings.OverrideWindowsStartButton)
+        {
+            _taskbarHookService.StartHook();
+        }
+
+        // Listen for settings changes
+        _settingsService.SettingsChanged += OnSettingsChanged;
+    }
+
+    private void OnSettingsChanged(object? sender, EventArgs e)
+    {
+        Dispatcher.Invoke(() =>
+        {
+            var settings = _settingsService!.Settings;
+
+            // Update keyboard hook
+            _keyboardHookService?.UpdateHotkey(settings.OpenMenuHotkey, settings.OverrideWindowsStartButton);
+
+            // Update taskbar hook
+            if (_taskbarHookService != null)
+            {
+                _taskbarHookService.IsEnabled = settings.OverrideWindowsStartButton;
+            }
+
+            // Update theme color
+            ApplyThemeColor(settings.AccentColor);
+        });
+    }
+
+    /// <summary>
+    /// Apply theme accent color to application resources
+    /// </summary>
+    public void ApplyThemeColor(string hexColor)
+    {
+        try
+        {
+            var color = (Color)ColorConverter.ConvertFromString(hexColor);
+            Resources["AccentColor"] = color;
+            Resources["AccentBrush"] = new SolidColorBrush(color);
+        }
+        catch
+        {
+            // Fallback to default blue
+            var defaultColor = (Color)ColorConverter.ConvertFromString("#0078D4");
+            Resources["AccentColor"] = defaultColor;
+            Resources["AccentBrush"] = new SolidColorBrush(defaultColor);
+        }
     }
 
     private void HandlePinFromContextMenu(string path)
@@ -70,6 +150,16 @@ public partial class App : Application
             // Initialize pinned items service just to add the pin
             // The FileSystemWatcher in the running instance will detect the change
             var pinnedService = new PinnedItemsService();
+            
+            // Check if already pinned - if so, do nothing
+            if (pinnedService.IsPinned(path))
+            {
+                System.Diagnostics.Debug.WriteLine($"Already pinned: {path}");
+                pinnedService.Dispose();
+                Shutdown();
+                return;
+            }
+            
             pinnedService.AddPin(path);
             pinnedService.Dispose();
 
@@ -86,11 +176,83 @@ public partial class App : Application
         }
     }
 
-    private void OnWindowsKeyPressed(object? sender, EventArgs e)
+    private void HandleUnpinFromContextMenu(string path)
+    {
+        try
+        {
+            // Initialize pinned items service just to remove the pin
+            // The FileSystemWatcher in the running instance will detect the change
+            var pinnedService = new PinnedItemsService();
+            
+            if (pinnedService.IsPinned(path))
+            {
+                pinnedService.RemovePin(path);
+                System.Diagnostics.Debug.WriteLine($"Unpinned: {path}");
+            }
+            else
+            {
+                System.Diagnostics.Debug.WriteLine($"Not pinned: {path}");
+            }
+            
+            pinnedService.Dispose();
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Failed to unpin: {ex.Message}");
+        }
+        finally
+        {
+            Shutdown();
+        }
+    }
+
+    private void CheckPinnedStatus(string path)
+    {
+        try
+        {
+            var pinnedService = new PinnedItemsService();
+            var isPinned = pinnedService.IsPinned(path);
+            pinnedService.Dispose();
+            
+            // Exit with code 0 if pinned, 1 if not pinned
+            // This can be used by scripts or other tools to check status
+            Environment.ExitCode = isPinned ? 0 : 1;
+            System.Diagnostics.Debug.WriteLine($"Check pinned status for {path}: {isPinned}");
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Failed to check pinned status: {ex.Message}");
+            Environment.ExitCode = 2; // Error
+        }
+        finally
+        {
+            Shutdown();
+        }
+    }
+
+    private void OnHotkeyPressed(object? sender, EventArgs e)
     {
         Dispatcher.Invoke(() =>
         {
             ToggleStartMenu();
+        });
+    }
+
+    private void OnStartButtonClicked(object? sender, EventArgs e)
+    {
+        Dispatcher.Invoke(() =>
+        {
+            // Small delay to ensure Windows Start Menu is closed
+            Task.Delay(100).ContinueWith(_ =>
+            {
+                Dispatcher.Invoke(() =>
+                {
+                    if (!IsMenuVisible)
+                    {
+                        ShowStartMenu();
+                    }
+                });
+            });
         });
     }
 
@@ -164,6 +326,9 @@ public partial class App : Application
         // Cleanup
         _keyboardHookService?.StopHook();
         _keyboardHookService?.Dispose();
+        _taskbarHookService?.StopHook();
+        _taskbarHookService?.Dispose();
+        _settingsService?.Dispose();
         _trayIcon?.Dispose();
         _startMenuWindow?.Close();
 

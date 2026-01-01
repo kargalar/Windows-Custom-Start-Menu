@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace CustomStartMenu.Models;
 
 /// <summary>
@@ -22,10 +24,32 @@ public class PinnedItem
     /// The group this item belongs to within its tab (null = ungrouped)
     /// </summary>
     public string? GroupId { get; set; }
+    
+    /// <summary>
+    /// Custom display name set by user (independent of file name)
+    /// </summary>
+    public string? CustomName { get; set; }
+    
+    /// <summary>
+    /// Grid row position for free-form layout mode (null = auto-positioned)
+    /// </summary>
+    public int? GridRow { get; set; }
+    
+    /// <summary>
+    /// Grid column position for free-form layout mode (null = auto-positioned)
+    /// </summary>
+    public int? GridColumn { get; set; }
+    
+    /// <summary>
+    /// Display name to show in UI - uses CustomName if set, otherwise falls back to Name
+    /// </summary>
+    [JsonIgnore]
+    public string DisplayName => !string.IsNullOrWhiteSpace(CustomName) ? CustomName : Name;
 }
 
 public enum PinnedItemType
 {
     Application,
-    Folder
+    Folder,
+    InternetShortcut
 }

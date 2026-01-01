@@ -7,7 +7,7 @@
         WindowStyle="None"
         AllowsTransparency="True"
         Background="Transparent"
-        ShowInTaskbar="False"
+        ShowInTaskbar="True"
         Topmost="True"
         ResizeMode="NoResize"
         Loaded="Window_Loaded"
@@ -146,6 +146,41 @@
             </Setter>
         </Style>
 
+        <!-- Pinned Item Button Style - Icon Only Mode (60x60) -->
+        <Style x:Key="PinnedItemIconOnlyStyle" TargetType="Button">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Width" Value="60"/>
+            <Setter Property="Height" Value="60"/>
+            <Setter Property="Margin" Value="4"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="AllowDrop" Value="True"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="border" 
+                                Background="{TemplateBinding Background}" 
+                                CornerRadius="8"
+                                Padding="4"
+                                BorderThickness="2"
+                                BorderBrush="Transparent">
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="border" Property="Background" Value="#30FFFFFF"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="border" Property="Background" Value="#50FFFFFF"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <!-- Group Header Style -->
         <Style x:Key="GroupHeaderStyle" TargetType="Border">
             <Setter Property="Background" Value="#15FFFFFF"/>
@@ -178,6 +213,39 @@
                             </Trigger>
                             <Trigger Property="IsPressed" Value="True">
                                 <Setter TargetName="border" Property="Background" Value="#50FFFFFF"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Search Result Item Style - Selected (keyboard navigation) -->
+        <Style x:Key="SearchResultSelectedStyle" TargetType="Button">
+            <Setter Property="Background" Value="#40FFFFFF"/>
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+            <Setter Property="Padding" Value="12,10"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="border" 
+                                Background="{TemplateBinding Background}" 
+                                CornerRadius="6"
+                                Padding="{TemplateBinding Padding}"
+                                BorderThickness="2"
+                                BorderBrush="{StaticResource AccentBrush}">
+                            <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                              VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="border" Property="Background" Value="#50FFFFFF"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="border" Property="Background" Value="#60FFFFFF"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -248,20 +316,8 @@
 
             <!-- Header with Tabs -->
             <Grid Grid.Row="0" Margin="0,0,0,8">
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="Auto"/>
-                </Grid.RowDefinitions>
-
-                <!-- Title -->
-                <TextBlock Grid.Row="0" Text="Custom Start Menu"
-                           FontSize="20"
-                           FontWeight="SemiBold"
-                           Foreground="{StaticResource TextBrush}"
-                           Margin="0,0,0,12"/>
-
                 <!-- Tab Bar -->
-                <Grid Grid.Row="1">
+                <Grid>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"/>
                         <ColumnDefinition Width="Auto"/>
@@ -283,7 +339,7 @@
                 </Grid>
 
                 <!-- Tab separator line -->
-                <Border Grid.Row="1" Height="1" Background="#30FFFFFF" 
+                <Border Height="1" Background="#30FFFFFF" 
                         VerticalAlignment="Bottom" Margin="0,0,0,0"/>
             </Grid>
 
@@ -334,6 +390,7 @@
                          Grid.Row="0"
                          Style="{StaticResource SearchBoxStyle}"
                          TextChanged="SearchBox_TextChanged"
+                         PreviewKeyDown="SearchBox_PreviewKeyDown"
                          Margin="0,0,0,16"/>
 
                 <!-- Search Results -->
@@ -367,10 +424,359 @@
                 </ScrollViewer>
             </Grid>
 
+            <!-- Content Area - Settings Page (Hidden by default) -->
+            <Grid x:Name="SettingsView" Grid.Row="1" Visibility="Collapsed">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel Margin="0,0,0,16">
+                        <!-- Settings Header with Back Button -->
+                        <Grid Margin="0,0,0,20">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            
+                            <Button x:Name="SettingsBackButton"
+                                    Grid.Column="0"
+                                    Style="{StaticResource MenuButtonStyle}"
+                                    Click="SettingsBackButton_Click"
+                                    ToolTip="Geri"
+                                    Margin="0,0,12,0">
+                                <TextBlock Text="←" FontSize="20"/>
+                            </Button>
+                            
+                            <TextBlock Grid.Column="1"
+                                       Text="Ayarlar"
+                                       FontSize="20"
+                                       FontWeight="SemiBold"
+                                       Foreground="{StaticResource TextBrush}"
+                                       VerticalAlignment="Center"/>
+                        </Grid>
+
+                        <!-- Show Icons Only Toggle -->
+                        <Border Background="#15FFFFFF" CornerRadius="8" Padding="16" Margin="0,0,0,12">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                
+                                <StackPanel Grid.Column="0">
+                                    <TextBlock Text="Sadece simgeleri göster"
+                                               FontSize="14"
+                                               Foreground="{StaticResource TextBrush}"/>
+                                    <TextBlock Text="Metin etiketlerini gizle"
+                                               FontSize="12"
+                                               Foreground="{StaticResource TextSecondaryBrush}"
+                                               Margin="0,4,0,0"/>
+                                </StackPanel>
+                                
+                                <CheckBox x:Name="IconsOnlyCheckBox"
+                                          Grid.Column="1"
+                                          VerticalAlignment="Center"
+                                          Checked="IconsOnlyCheckBox_Changed"
+                                          Unchecked="IconsOnlyCheckBox_Changed"/>
+                            </Grid>
+                        </Border>
+
+                        <!-- Transparency Slider -->
+                        <Border Background="#15FFFFFF" CornerRadius="8" Padding="16" Margin="0,0,0,12">
+                            <StackPanel>
+                                <TextBlock x:Name="TransparencyLabel"
+                                           Text="Menü saydamlığı: 85%"
+                                           FontSize="14"
+                                           Foreground="{StaticResource TextBrush}"
+                                           Margin="0,0,0,12"/>
+                                <Slider x:Name="TransparencySlider"
+                                        Minimum="0"
+                                        Maximum="100"
+                                        Value="85"
+                                        ValueChanged="TransparencySlider_ValueChanged"/>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Layout Mode -->
+                        <Border Background="#15FFFFFF" CornerRadius="8" Padding="16" Margin="0,0,0,12">
+                            <StackPanel>
+                                <TextBlock Text="Düzen modu"
+                                           FontSize="14"
+                                           Foreground="{StaticResource TextBrush}"
+                                           Margin="0,0,0,12"/>
+                                <ComboBox x:Name="LayoutModeComboBox"
+                                          SelectionChanged="LayoutModeComboBox_SelectionChanged">
+                                    <ComboBoxItem Content="Sıralı (Otomatik)" Tag="Ordered"/>
+                                    <ComboBoxItem Content="Serbest (Manuel)" Tag="FreeForm"/>
+                                </ComboBox>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Web Search URL -->
+                        <Border Background="#15FFFFFF" CornerRadius="8" Padding="16" Margin="0,0,0,12">
+                            <StackPanel>
+                                <TextBlock Text="Web arama URL'si"
+                                           FontSize="14"
+                                           Foreground="{StaticResource TextBrush}"
+                                           Margin="0,0,0,4"/>
+                                <TextBlock Text="Yukarı ok tuşuyla web araması yaparken kullanılır"
+                                           FontSize="12"
+                                           Foreground="{StaticResource TextSecondaryBrush}"
+                                           Margin="0,0,0,12"/>
+                                <TextBox x:Name="WebSearchUrlTextBox"
+                                         Style="{StaticResource SearchBoxStyle}"
+                                         LostFocus="WebSearchUrlTextBox_LostFocus"/>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Separator -->
+                        <Border Height="1" Background="#30FFFFFF" Margin="0,8,0,20"/>
+                        <TextBlock Text="Görünüm ve Davranış"
+                                   FontSize="16"
+                                   FontWeight="SemiBold"
+                                   Foreground="{StaticResource TextBrush}"
+                                   Margin="0,0,0,16"/>
+
+                        <!-- Enable Animations Toggle -->
+                        <Border Background="#15FFFFFF" CornerRadius="8" Padding="16" Margin="0,0,0,12">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                
+                                <StackPanel Grid.Column="0">
+                                    <TextBlock Text="Animasyonları etkinleştir"
+                                               FontSize="14"
+                                               Foreground="{StaticResource TextBrush}"/>
+                                    <TextBlock Text="Menü açılış/kapanış animasyonları"
+                                               FontSize="12"
+                                               Foreground="{StaticResource TextSecondaryBrush}"
+                                               Margin="0,4,0,0"/>
+                                </StackPanel>
+                                
+                                <CheckBox x:Name="AnimationsCheckBox"
+                                          Grid.Column="1"
+                                          VerticalAlignment="Center"
+                                          Checked="AnimationsCheckBox_Changed"
+                                          Unchecked="AnimationsCheckBox_Changed"/>
+                            </Grid>
+                        </Border>
+
+                        <!-- Menu Position -->
+                        <Border Background="#15FFFFFF" CornerRadius="8" Padding="16" Margin="0,0,0,12">
+                            <StackPanel>
+                                <TextBlock Text="Menü konumu"
+                                           FontSize="14"
+                                           Foreground="{StaticResource TextBrush}"
+                                           Margin="0,0,0,12"/>
+                                <ComboBox x:Name="PositionComboBox"
+                                          SelectionChanged="PositionComboBox_SelectionChanged">
+                                    <ComboBoxItem Content="Sol" Tag="Left"/>
+                                    <ComboBoxItem Content="Orta" Tag="Center"/>
+                                </ComboBox>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Menu Size -->
+                        <Border Background="#15FFFFFF" CornerRadius="8" Padding="16" Margin="0,0,0,12">
+                            <StackPanel>
+                                <TextBlock Text="Menü boyutu"
+                                           FontSize="14"
+                                           Foreground="{StaticResource TextBrush}"
+                                           Margin="0,0,0,12"/>
+                                <ComboBox x:Name="SizeComboBox"
+                                          SelectionChanged="SizeComboBox_SelectionChanged">
+                                    <ComboBoxItem Content="Normal (650x750)" Tag="Normal"/>
+                                    <ComboBoxItem Content="Büyük (900x850)" Tag="Large"/>
+                                    <ComboBoxItem Content="Tam Ekran" Tag="Fullscreen"/>
+                                    <ComboBoxItem Content="Özel" Tag="Custom"/>
+                                </ComboBox>
+                                
+                                <!-- Custom Size Inputs -->
+                                <StackPanel x:Name="CustomSizePanel" Visibility="Collapsed" Margin="0,12,0,0">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="16"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Grid.Column="0">
+                                            <TextBlock Text="Genişlik" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,4"/>
+                                            <TextBox x:Name="CustomWidthTextBox" Style="{StaticResource SearchBoxStyle}" Text="650" LostFocus="CustomSizeTextBox_LostFocus"/>
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="2">
+                                            <TextBlock Text="Yükseklik" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,4"/>
+                                            <TextBox x:Name="CustomHeightTextBox" Style="{StaticResource SearchBoxStyle}" Text="750" LostFocus="CustomSizeTextBox_LostFocus"/>
+                                        </StackPanel>
+                                    </Grid>
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Items Per Row -->
+                        <Border Background="#15FFFFFF" CornerRadius="8" Padding="16" Margin="0,0,0,12">
+                            <StackPanel>
+                                <TextBlock x:Name="ItemsPerRowLabel"
+                                           Text="Satır başına öğe: Otomatik"
+                                           FontSize="14"
+                                           Foreground="{StaticResource TextBrush}"
+                                           Margin="0,0,0,12"/>
+                                <Slider x:Name="ItemsPerRowSlider"
+                                        Minimum="0"
+                                        Maximum="10"
+                                        Value="0"
+                                        IsSnapToTickEnabled="True"
+                                        TickFrequency="1"
+                                        ValueChanged="ItemsPerRowSlider_ValueChanged"/>
+                                <TextBlock Text="0 = Otomatik (pencere genişliğine göre)"
+                                           FontSize="11"
+                                           Foreground="{StaticResource TextSecondaryBrush}"
+                                           Margin="0,8,0,0"/>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Separator -->
+                        <Border Height="1" Background="#30FFFFFF" Margin="0,8,0,20"/>
+                        <TextBlock Text="Kısayol Tuşu"
+                                   FontSize="16"
+                                   FontWeight="SemiBold"
+                                   Foreground="{StaticResource TextBrush}"
+                                   Margin="0,0,0,16"/>
+
+                        <!-- Override Windows Start Button -->
+                        <Border Background="#15FFFFFF" CornerRadius="8" Padding="16" Margin="0,0,0,12">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                
+                                <StackPanel Grid.Column="0">
+                                    <TextBlock Text="Taskbar başlat butonunu kullan"
+                                               FontSize="14"
+                                               Foreground="{StaticResource TextBrush}"/>
+                                    <TextBlock Text="Taskbardaki Start butonuna tıklayınca bu menü açılır"
+                                               FontSize="12"
+                                               Foreground="{StaticResource TextSecondaryBrush}"
+                                               Margin="0,4,0,0"/>
+                                </StackPanel>
+                                
+                                <CheckBox x:Name="OverrideWinKeyCheckBox"
+                                          Grid.Column="1"
+                                          VerticalAlignment="Center"
+                                          Checked="OverrideWinKeyCheckBox_Changed"
+                                          Unchecked="OverrideWinKeyCheckBox_Changed"/>
+                            </Grid>
+                        </Border>
+
+                        <!-- Hotkey Configuration -->
+                        <Border Background="#15FFFFFF" CornerRadius="8" Padding="16" Margin="0,0,0,12">
+                            <StackPanel>
+                                <TextBlock Text="Kısayol tuşu kombinasyonu"
+                                           FontSize="14"
+                                           Foreground="{StaticResource TextBrush}"
+                                           Margin="0,0,0,12"/>
+                                
+                                <Grid>
+                                                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    
+                                    <!-- Current Hotkey Display -->
+                                    <Border x:Name="HotkeyDisplayBorder" 
+                                            Background="#10FFFFFF" 
+                                            CornerRadius="6" 
+                                            Padding="12,8" 
+                                            Margin="0,0,12,0">
+                                        <TextBlock x:Name="HotkeyDisplayText"
+                                                   Text="Win"
+                                                   FontSize="14"
+                                                   Foreground="{StaticResource TextBrush}"
+                                                   VerticalAlignment="Center"/>
+                                    </Border>
+                                    
+                                    <!-- Assign Button -->
+                                    <Button x:Name="HotkeyAssignButton" 
+                                            Grid.Column="1"
+                                            Content="Ata"
+                                            Style="{StaticResource MenuButtonStyle}"
+                                            Background="{StaticResource AccentBrush}"
+                                            Padding="16,8"
+                                            Click="HotkeyAssignButton_Click"/>
+                                    
+                                    <!-- Save Button (hidden initially) -->
+                                    <Button x:Name="HotkeySaveButton" 
+                                            Grid.Column="2"
+                                            Content="Kaydet"
+                                            Style="{StaticResource MenuButtonStyle}"
+                                            Background="#22C55E"
+                                            Padding="16,8"
+                                            Margin="8,0,0,0"
+                                            Visibility="Collapsed"
+                                            Click="HotkeySaveButton_Click"/>
+                                    
+                                    <!-- Cancel Button (hidden initially) -->
+                                    <Button x:Name="HotkeyCancelButton" 
+                                            Grid.Column="3"
+                                            Content="İptal"
+                                            Style="{StaticResource MenuButtonStyle}"
+                                            Background="#EF4444"
+                                            Padding="16,8"
+                                            Margin="8,0,0,0"
+                                            Visibility="Collapsed"
+                                            Click="HotkeyCancelButton_Click"/>
+                                </Grid>
+                                
+                                <!-- Instruction Text -->
+                                <TextBlock x:Name="HotkeyInstructionText"
+                                           Text=""
+                                           FontSize="11"
+                                           Foreground="{StaticResource TextSecondaryBrush}"
+                                           Margin="0,8,0,0"
+                                           TextWrapping="Wrap"
+                                           Visibility="Collapsed"/>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Separator -->
+                        <Border Height="1" Background="#30FFFFFF" Margin="0,8,0,20"/>
+                        <TextBlock Text="Tema"
+                                   FontSize="16"
+                                   FontWeight="SemiBold"
+                                   Foreground="{StaticResource TextBrush}"
+                                   Margin="0,0,0,16"/>
+
+                        <!-- Theme Color -->
+                        <Border Background="#15FFFFFF" CornerRadius="8" Padding="16" Margin="0,0,0,12">
+                            <StackPanel>
+                                <TextBlock Text="Tema rengi"
+                                           FontSize="14"
+                                           Foreground="{StaticResource TextBrush}"
+                                           Margin="0,0,0,12"/>
+                                <WrapPanel>
+                                    <Button x:Name="ColorBlue" Style="{StaticResource MenuButtonStyle}" Background="#0078D4" Width="36" Height="36" Margin="0,0,8,8" Click="ThemeColor_Click" Tag="#0078D4" ToolTip="Mavi"/>
+                                    <Button x:Name="ColorPurple" Style="{StaticResource MenuButtonStyle}" Background="#8B5CF6" Width="36" Height="36" Margin="0,0,8,8" Click="ThemeColor_Click" Tag="#8B5CF6" ToolTip="Mor"/>
+                                    <Button x:Name="ColorPink" Style="{StaticResource MenuButtonStyle}" Background="#EC4899" Width="36" Height="36" Margin="0,0,8,8" Click="ThemeColor_Click" Tag="#EC4899" ToolTip="Pembe"/>
+                                    <Button x:Name="ColorRed" Style="{StaticResource MenuButtonStyle}" Background="#EF4444" Width="36" Height="36" Margin="0,0,8,8" Click="ThemeColor_Click" Tag="#EF4444" ToolTip="Kırmızı"/>
+                                    <Button x:Name="ColorOrange" Style="{StaticResource MenuButtonStyle}" Background="#F97316" Width="36" Height="36" Margin="0,0,8,8" Click="ThemeColor_Click" Tag="#F97316" ToolTip="Turuncu"/>
+                                    <Button x:Name="ColorYellow" Style="{StaticResource MenuButtonStyle}" Background="#EAB308" Width="36" Height="36" Margin="0,0,8,8" Click="ThemeColor_Click" Tag="#EAB308" ToolTip="Sarı"/>
+                                    <Button x:Name="ColorGreen" Style="{StaticResource MenuButtonStyle}" Background="#22C55E" Width="36" Height="36" Margin="0,0,8,8" Click="ThemeColor_Click" Tag="#22C55E" ToolTip="Yeşil"/>
+                                    <Button x:Name="ColorTeal" Style="{StaticResource MenuButtonStyle}" Background="#14B8A6" Width="36" Height="36" Margin="0,0,8,8" Click="ThemeColor_Click" Tag="#14B8A6" ToolTip="Turkuaz"/>
+                                    <Button x:Name="ColorCyan" Style="{StaticResource MenuButtonStyle}" Background="#06B6D4" Width="36" Height="36" Margin="0,0,8,8" Click="ThemeColor_Click" Tag="#06B6D4" ToolTip="Camgöbeği"/>
+                                    <Button x:Name="ColorGray" Style="{StaticResource MenuButtonStyle}" Background="#6B7280" Width="36" Height="36" Margin="0,0,8,8" Click="ThemeColor_Click" Tag="#6B7280" ToolTip="Gri"/>
+                                </WrapPanel>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </ScrollViewer>
+            </Grid>
+
             <!-- Footer -->
             <Grid Grid.Row="2" Margin="0,16,0,0">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
 
@@ -391,8 +797,20 @@
                                VerticalAlignment="Center"/>
                 </StackPanel>
 
-                <!-- Power Button -->
+                <!-- Settings Button -->
                 <Button Grid.Column="1"
+                        Style="{StaticResource MenuButtonStyle}"
+                        Click="SettingsButton_Click"
+                        ToolTip="Ayarlar"
+                        Margin="0,0,8,0">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="⚙" FontSize="18" Margin="0,0,8,0"/>
+                        <TextBlock Text="Ayarlar" FontSize="14"/>
+                    </StackPanel>
+                </Button>
+
+                <!-- Power Button -->
+                <Button Grid.Column="2"
                         Style="{StaticResource MenuButtonStyle}"
                         Click="PowerButton_Click"
                         ToolTip="Güç Seçenekleri">

@@ -1,23 +1,25 @@
-pinlenen folder olmayan öğelerin isimleri dosya adından bağımsız olara kdeğiştirilebilecke. yani burada değiştirdi diye dosyanın ismi değişmeyecek.
+spospgaliba şuan arama kımında sadece bilgisayardaki dosyaları arıyor. bilgisayardaki uygulamalı da arasın. mesela spotify aratında çıkmadı.
 
-bir ayarlar menüsü ekle. ayarlar menüsüne, pinlenen öğelerin sadece iconlarını göster seçeneği ekle.
-
-galiba şuan arama kımındasadece bilgisayardaki dosyaları arıyor. bilgisayardaki uygulamalı da arasın. mesela spotify aratında çıkmadı.
-
-arama sayfasında sonuçlar arasında yön oklarıyla gezebileyim. eğer arama yaptıktan somra ilk olarak yukarı yön tuşuna basarsam yazığım şeyi web tarayıcısında arasın.
-
-arama sayfasına matematik işlemi yazmışsam sonucunu direkt göstersin.
-
-menunun saydamlığı ayarar sayfasında ayarlanabilsin.
-
-eğer daha önceden bir dosyayı pinlemişsem dosyaya sağ tıkaldığımda pinle yerine kaldır seçeneği olsun.
-
-menunun üstündeki custom start menu yazsını kaldır.
+spoeğer daha önceden bir dosyayı pinlemişsem dosyaya sağ tıkaldığımda pinle yerine kaldır seçeneği olsun.
 
 internet shortcut olan dosyalar da pinlenebilsin.
 
-arama sayfasında sonuça sağ tıklayınca menü açılsın oradan pinlenebilsin. veya dosya konumuna gidilebilsin. benzer sağ tık menu, custom start menudeki öğeler için de olsun.
-
 sürükleyip bırakarak pinlen öğeleri oluşturduğum gruba ekleyemiyorum. ve grubu sürükleyip sıraını değiştiremiyorum.
 
-ayarlarda pinlene öğeleri düzeni için sıralı veya serbest switchi ekle. sırlaı olduğunda otomatik olarak hepsi yan yana sırlansın. ama serbert olduğunda kullanıcı pini sürükleyerek gridde istediği yere bırakabilsin.
+öğelerin sırasınıdeğiştirme sistemi düzgün çalışmıyor. geriye alırken sorun yok ama öne almak istersem bir gdrip oluyor. bazen gidiyor bazen gitmiyor bazen farklı gidiy anlamadım.
+
+uygulama aynı anda birdn falza başlatılammalı. aynı anda 1 tane kopya çalışailir.
+
+serbest modda sürüklerken gridlerde hafif şeffaf gösterilsin. grup öğeleri de serbest istediği yere koyulabilsin.
+
+ayrıca benim win tuşunu override et dediğim şey klavyedeki değil windows taskbardaki buton du.
+
+satır öğe işlevsiz
+
+tema tenk işlevsiz
+
+ayarlda checkbox yerine switch kullan
+
+menüde çok öğe olduğunda kayıdırma şeyi çıkıyor. kaydırılamasın. menüde ne kadar alan varsa o kadarı kullanılabilir olacak. eğer kullanıcı menu arayüzünü büyük seçip doldurmuşşsa ve sonra menü arayüzüne küçültmüşse taşan öğeler için otomatik olarak bir klasör oluşturuluacak. öğeler oraya eklenecek.
+
+ayarlar ve güç butonları sadece icon olsun. sol alttaki porfil bilgielrini kaldır.

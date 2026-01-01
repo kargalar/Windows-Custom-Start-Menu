@@ -317,6 +317,40 @@ public class PinnedItemsService : IDisposable
         }
     }
 
+    /// <summary>
+    /// Move a group to a new position within its tab
+    /// </summary>
+    /// <param name="groupId">The ID of the group to move</param>
+    /// <param name="toIndex">The target index position</param>
+    public void MoveGroup(string groupId, int toIndex)
+    {
+        var group = _groups.FirstOrDefault(g => g.Id == groupId);
+        if (group == null) return;
+
+        var groupsInTab = _groups
+            .Where(g => g.TabId == group.TabId)
+            .OrderBy(g => g.Order)
+            .ToList();
+
+        // Remove the group from its current position
+        groupsInTab.Remove(group);
+
+        // Clamp the target index
+        toIndex = Math.Max(0, Math.Min(toIndex, groupsInTab.Count));
+
+        // Insert at the new position
+        groupsInTab.Insert(toIndex, group);
+
+        // Update order values
+        for (int i = 0; i < groupsInTab.Count; i++)
+        {
+            groupsInTab[i].Order = i;
+        }
+
+        Save();
+        PinnedItemsChanged?.Invoke(this, EventArgs.Empty);
+    }
+
     private void ReorderGroupsInTab(string? tabId)
     {
         var groupsInTab = _groups.Where(g => g.TabId == tabId).OrderBy(g => g.Order).ToList();
@@ -349,11 +383,26 @@ public class PinnedItemsService : IDisposable
             .Where(p => p.TabId == tabId && p.GroupId == groupId)
             .ToList();
 
+        // Determine the item type
+        PinnedItemType itemType;
+        if (isDirectory)
+        {
+            itemType = PinnedItemType.Folder;
+        }
+        else if (path.EndsWith(".url", StringComparison.OrdinalIgnoreCase))
+        {
+            itemType = PinnedItemType.InternetShortcut;
+        }
+        else
+        {
+            itemType = PinnedItemType.Application;
+        }
+
         var item = new PinnedItem
         {
             Path = path,
             Name = Path.GetFileNameWithoutExtension(path) ?? Path.GetFileName(path),
-            Type = isDirectory ? PinnedItemType.Folder : PinnedItemType.Application,
+            Type = itemType,
             Order = itemsInContext.Count,
             TabId = tabId,
             GroupId = groupId
@@ -391,6 +440,58 @@ public class PinnedItemsService : IDisposable
     public bool IsPinned(string path)
     {
         return _pinnedItems.Any(p => p.Path.Equals(path, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// Update a pinned item (e.g., after renaming)
+    /// </summary>
+    public void UpdatePinnedItem(PinnedItem item)
+    {
+        var existingItem = _pinnedItems.FirstOrDefault(p => p.Id == item.Id);
+        if (existingItem != null)
+        {
+            // Update the properties that can be changed
+            existingItem.CustomName = item.CustomName;
+            existingItem.GridRow = item.GridRow;
+            existingItem.GridColumn = item.GridColumn;
+            // Add other updatable properties here as needed
+            
+            Save();
+            PinnedItemsChanged?.Invoke(this, EventArgs.Empty);
+        }
+    }
+
+    /// <summary>
+    /// Clear grid positions for all items in a tab (used when switching to Ordered mode)
+    /// </summary>
+    public void ClearGridPositionsForTab(string? tabId)
+    {
+        tabId ??= DefaultTab.Id;
+        
+        var itemsInTab = _pinnedItems.Where(p => p.TabId == tabId).ToList();
+        foreach (var item in itemsInTab)
+        {
+            item.GridRow = null;
+            item.GridColumn = null;
+        }
+        
+        Save();
+        PinnedItemsChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>
+    /// Update grid position for a pinned item (used in FreeForm mode)
+    /// </summary>
+    public void UpdateItemGridPosition(string itemId, int? gridRow, int? gridColumn)
+    {
+        var item = _pinnedItems.FirstOrDefault(p => p.Id == itemId);
+        if (item != null)
+        {
+            item.GridRow = gridRow;
+            item.GridColumn = gridColumn;
+            Save();
+            PinnedItemsChanged?.Invoke(this, EventArgs.Empty);
+        }
     }
 
     public void MoveItem(string itemId, int toIndex, string? targetTabId = null, string? targetGroupId = null)

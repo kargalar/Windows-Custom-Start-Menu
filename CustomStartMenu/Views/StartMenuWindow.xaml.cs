@@ -53,8 +53,12 @@ public partial class StartMenuWindow : Window
     private readonly SearchService _searchService;
     private readonly PinnedItemsService _pinnedItemsService;
     private readonly IconService _iconService;
+    private readonly SettingsService _settingsService;
     private CancellationTokenSource? _searchCts;
     private bool _isInSearchMode;
+    
+    // Search keyboard navigation
+    private int _selectedSearchIndex = -1; // -1 means no selection
     
     // Tab management
     private string? _currentTabId;
@@ -65,6 +69,18 @@ public partial class StartMenuWindow : Window
     private bool _isDragging;
     private PinnedItem? _draggedItem;
     private Button? _draggedButton;
+    
+    // Group Drag & Drop
+    private Group? _draggedGroup;
+    private Button? _draggedGroupButton;
+    
+    // Mouse hook for click outside detection
+    private readonly MouseHookService _mouseHookService;
+    
+    // Inline rename
+    private TextBox? _activeRenameTextBox;
+    private TextBlock? _activeRenameTextBlock;
+    private PinnedItem? _renamingItem;
 
     public StartMenuWindow()
     {
@@ -74,13 +90,62 @@ public partial class StartMenuWindow : Window
         _searchService = new SearchService();
         _pinnedItemsService = App.Instance.PinnedItemsService;
         _iconService = IconService.Instance;
+        _settingsService = new SettingsService();
+        _mouseHookService = new MouseHookService();
+        
         _pinnedItemsService.PinnedItemsChanged += OnPinnedItemsChanged;
+        _settingsService.SettingsChanged += OnSettingsChanged;
+        _mouseHookService.MouseClicked += OnMouseClickedOutside;
+        App.Instance.KeyboardHookService.CharacterInput += OnGlobalCharacterInput;
 
         // Set initial tab
         _currentTabId = _pinnedItemsService.DefaultTab.Id;
 
         RefreshTabs();
         RefreshPinnedItems();
+    }
+    
+    private void OnMouseClickedOutside(object? sender, MouseClickEventArgs e)
+    {
+        Dispatcher.Invoke(() =>
+        {
+            if (!IsVisible) return;
+            
+            // Get window bounds in screen coordinates
+            var windowLeft = Left;
+            var windowTop = Top;
+            var windowRight = Left + ActualWidth;
+            var windowBottom = Top + ActualHeight;
+            
+            // Check if click is outside the window
+            if (e.X < windowLeft || e.X > windowRight || e.Y < windowTop || e.Y > windowBottom)
+            {
+                HideMenu();
+            }
+        });
+    }
+
+    private void OnSettingsChanged(object? sender, EventArgs e)
+    {
+        Dispatcher.Invoke(() =>
+        {
+            ApplyTransparency();
+            RefreshPinnedItems();
+        });
+    }
+
+    /// <summary>
+    /// Apply the current transparency setting to the MainBorder background
+    /// </summary>
+    private void ApplyTransparency()
+    {
+        var transparency = _settingsService.Settings.MenuTransparency;
+        
+        // Create a new brush with the transparency applied
+        // Base color is #202020 (dark gray), we apply the transparency as alpha
+        var alpha = (byte)(transparency * 255);
+        var backgroundColor = Color.FromArgb(alpha, 0x20, 0x20, 0x20);
+        MainBorder.Background = new SolidColorBrush(backgroundColor);
     }
 
     private void SetUserName()
@@ -98,26 +163,39 @@ public partial class StartMenuWindow : Window
     private void Window_Loaded(object sender, RoutedEventArgs e)
     {
         PositionWindow();
+        ApplyTransparency();
     }
 
     private void PositionWindow()
     {
+        // Apply menu size first
+        ApplyMenuSize();
+
         // Get taskbar position and size
         var taskbarInfo = GetTaskbarInfo();
 
         // Get working area (screen minus taskbar)
         var workArea = SystemParameters.WorkArea;
 
-        // Position based on taskbar location
+        // Check if position should be centered
+        bool centerPosition = _settingsService.Settings.Position == MenuPosition.Center;
+
+        // Position based on taskbar location and position setting
         switch (taskbarInfo.Edge)
         {
             case ABE_BOTTOM:
-                Left = workArea.Left + 12;
+                if (centerPosition)
+                    Left = workArea.Left + (workArea.Width - Width) / 2;
+                else
+                    Left = workArea.Left + 12;
                 Top = workArea.Bottom - Height;
                 break;
 
             case ABE_TOP:
-                Left = workArea.Left + 12;
+                if (centerPosition)
+                    Left = workArea.Left + (workArea.Width - Width) / 2;
+                else
+                    Left = workArea.Left + 12;
                 Top = workArea.Top;
                 break;
 
@@ -132,8 +210,46 @@ public partial class StartMenuWindow : Window
                 break;
 
             default:
-                Left = 12;
+                if (centerPosition)
+                    Left = workArea.Left + (workArea.Width - Width) / 2;
+                else
+                    Left = 12;
                 Top = workArea.Bottom - Height;
+                break;
+        }
+    }
+
+    private void ApplyMenuSize()
+    {
+        var settings = _settingsService.Settings;
+        var workArea = SystemParameters.WorkArea;
+
+        switch (settings.Size)
+        {
+            case MenuSize.Normal:
+                Width = 650;
+                Height = 750;
+                WindowState = WindowState.Normal;
+                break;
+
+            case MenuSize.Large:
+                Width = 900;
+                Height = 850;
+                WindowState = WindowState.Normal;
+                break;
+
+            case MenuSize.Fullscreen:
+                Width = workArea.Width;
+                Height = workArea.Height;
+                Left = workArea.Left;
+                Top = workArea.Top;
+                WindowState = WindowState.Normal;
+                break;
+
+            case MenuSize.Custom:
+                Width = Math.Min(settings.CustomWidth, workArea.Width);
+                Height = Math.Min(settings.CustomHeight, workArea.Height);
+                WindowState = WindowState.Normal;
                 break;
         }
     }
@@ -159,24 +275,43 @@ public partial class StartMenuWindow : Window
         // Reset to pinned items view
         SwitchToPinnedView();
 
-        // Reset opacity for animation
-        MainBorder.Opacity = 0;
-        MainBorder.RenderTransform = new TranslateTransform(0, 20);
+        bool useAnimations = _settingsService.Settings.EnableAnimations;
+
+        if (useAnimations)
+        {
+            // Reset opacity for animation
+            MainBorder.Opacity = 0;
+            MainBorder.RenderTransform = new TranslateTransform(0, 20);
+        }
+        else
+        {
+            MainBorder.Opacity = 1;
+            MainBorder.RenderTransform = new TranslateTransform(0, 0);
+        }
 
         Show();
         Activate();
 
-        // Animate in
-        var fadeIn = new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(150));
-        var slideIn = new DoubleAnimation(20, 0, TimeSpan.FromMilliseconds(150))
+        if (useAnimations)
         {
-            EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut }
-        };
+            // Animate in
+            var fadeIn = new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(150));
+            var slideIn = new DoubleAnimation(20, 0, TimeSpan.FromMilliseconds(150))
+            {
+                EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut }
+            };
 
-        MainBorder.BeginAnimation(OpacityProperty, fadeIn);
-        ((TranslateTransform)MainBorder.RenderTransform).BeginAnimation(
-            TranslateTransform.YProperty, slideIn);
+            MainBorder.BeginAnimation(OpacityProperty, fadeIn);
+            ((TranslateTransform)MainBorder.RenderTransform).BeginAnimation(
+                TranslateTransform.YProperty, slideIn);
+        }
 
+        // Start mouse hook to detect clicks outside
+        _mouseHookService.StartHook();
+        
+        // Enable global text input capture
+        App.Instance.KeyboardHookService.CaptureTextInput = true;
+        
         RefreshTabs();
         RefreshPinnedItems();
     }
@@ -187,16 +322,38 @@ public partial class StartMenuWindow : Window
 
         _isClosing = true;
         _searchCts?.Cancel();
+        
+        // Stop mouse hook
+        _mouseHookService.StopHook();
+        
+        // Disable global text input capture
+        App.Instance.KeyboardHookService.CaptureTextInput = false;
 
-        // Animate out
-        var fadeOut = new DoubleAnimation(1, 0, TimeSpan.FromMilliseconds(100));
-        fadeOut.Completed += (s, e) =>
+        // Cancel hotkey assignment if active
+        if (_isAssigningHotkey)
+        {
+            CancelHotkeyAssignment();
+        }
+
+        bool useAnimations = _settingsService.Settings.EnableAnimations;
+
+        if (useAnimations)
+        {
+            // Animate out
+            var fadeOut = new DoubleAnimation(1, 0, TimeSpan.FromMilliseconds(100));
+            fadeOut.Completed += (s, e) =>
+            {
+                Hide();
+                _isClosing = false;
+            };
+
+            MainBorder.BeginAnimation(OpacityProperty, fadeOut);
+        }
+        else
         {
             Hide();
             _isClosing = false;
-        };
-
-        MainBorder.BeginAnimation(OpacityProperty, fadeOut);
+        }
     }
 
     private void Window_Deactivated(object sender, EventArgs e)
@@ -206,6 +363,13 @@ public partial class StartMenuWindow : Window
 
     private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
     {
+        // Handle hotkey assignment mode first
+        if (_isAssigningHotkey)
+        {
+            HandleHotkeyAssignmentKeyDown(e);
+            return;
+        }
+
         if (e.Key == Key.Escape)
         {
             if (_isInSearchMode)
@@ -233,6 +397,25 @@ public partial class StartMenuWindow : Window
 
     private void Window_PreviewTextInput(object sender, TextCompositionEventArgs e)
     {
+        // Don't switch to search mode if assigning hotkey
+        if (_isAssigningHotkey)
+        {
+            e.Handled = true;
+            return;
+        }
+        
+        // Don't switch to search mode if inline rename is active
+        if (_activeRenameTextBox != null)
+        {
+            return;
+        }
+        
+        // Don't switch to search mode if settings view is visible
+        if (SettingsView.Visibility == Visibility.Visible)
+        {
+            return;
+        }
+
         // Any text input switches to search mode
         if (!_isInSearchMode && !string.IsNullOrWhiteSpace(e.Text))
         {
@@ -241,6 +424,41 @@ public partial class StartMenuWindow : Window
             SearchBox.CaretIndex = SearchBox.Text.Length;
             e.Handled = true;
         }
+    }
+    
+    private void OnGlobalCharacterInput(object? sender, char character)
+    {
+        Dispatcher.Invoke(() =>
+        {
+            if (!IsVisible) return;
+            
+            // Don't switch to search mode if assigning hotkey
+            if (_isAssigningHotkey) return;
+            
+            // Don't switch to search mode if inline rename is active
+            if (_activeRenameTextBox != null) return;
+            
+            // Don't switch to search mode if settings view is visible
+            if (SettingsView.Visibility == Visibility.Visible) return;
+            
+            // Switch to search mode and add character
+            if (!_isInSearchMode)
+            {
+                SwitchToSearchView();
+                SearchBox.Text = character.ToString();
+                SearchBox.CaretIndex = SearchBox.Text.Length;
+            }
+            else
+            {
+                // Already in search mode, append character
+                SearchBox.Text += character;
+                SearchBox.CaretIndex = SearchBox.Text.Length;
+            }
+            
+            // Bring window to front and focus
+            Activate();
+            SearchBox.Focus();
+        });
     }
 
     private void Window_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
@@ -293,7 +511,9 @@ public partial class StartMenuWindow : Window
     private void SwitchToSearchView()
     {
         _isInSearchMode = true;
+        _selectedSearchIndex = -1; // Reset selection
         PinnedItemsView.Visibility = Visibility.Collapsed;
+        SettingsView.Visibility = Visibility.Collapsed;
         SearchView.Visibility = Visibility.Visible;
         SearchBox.Clear();
         SearchBox.Focus();
@@ -305,7 +525,15 @@ public partial class StartMenuWindow : Window
     private void SwitchToPinnedView()
     {
         _isInSearchMode = false;
+        
+        // Cancel hotkey assignment if active
+        if (_isAssigningHotkey)
+        {
+            CancelHotkeyAssignment();
+        }
+        
         SearchView.Visibility = Visibility.Collapsed;
+        SettingsView.Visibility = Visibility.Collapsed;
         PinnedItemsView.Visibility = Visibility.Visible;
         _searchCts?.Cancel();
     }
@@ -539,14 +767,35 @@ public partial class StartMenuWindow : Window
             // Small delay for debouncing
             await Task.Delay(150, token);
 
-            var results = await _searchService.SearchAsync(query, token);
-
             if (token.IsCancellationRequested) return;
 
             SearchingText.Visibility = Visibility.Collapsed;
             SearchResultsPanel.Items.Clear();
 
-            if (results.Count == 0)
+            // Reset selection when search changes
+            _selectedSearchIndex = -1;
+
+            // Check if query is a math expression first
+            if (MathEvaluator.TryEvaluate(query, out var mathResult))
+            {
+                var formattedResult = MathEvaluator.FormatResult(mathResult);
+                var calcResult = new SearchResult
+                {
+                    Name = $"{query} = {formattedResult}",
+                    Path = formattedResult,
+                    Type = SearchResultType.Calculation,
+                    Score = 1000 // Highest score to ensure it's first
+                };
+                var calcButton = CreateSearchResultButton(calcResult);
+                SearchResultsPanel.Items.Add(calcButton);
+            }
+
+            // Then search for applications
+            var results = await _searchService.SearchAsync(query, token);
+
+            if (token.IsCancellationRequested) return;
+
+            if (results.Count == 0 && SearchResultsPanel.Items.Count == 0)
             {
                 NoResultsText.Visibility = Visibility.Visible;
                 return;
@@ -569,10 +818,115 @@ public partial class StartMenuWindow : Window
         }
     }
 
+    private void SearchBox_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        var itemCount = SearchResultsPanel.Items.Count;
+
+        if (e.Key == Key.Down)
+        {
+            // Move selection down
+            if (itemCount > 0)
+            {
+                _selectedSearchIndex++;
+                if (_selectedSearchIndex >= itemCount)
+                {
+                    _selectedSearchIndex = 0; // Wrap to first
+                }
+                UpdateSearchResultSelection();
+            }
+            e.Handled = true;
+        }
+        else if (e.Key == Key.Up)
+        {
+            if (_selectedSearchIndex == -1 && !string.IsNullOrWhiteSpace(SearchBox.Text))
+            {
+                // No selection yet and user pressed Up - trigger web search
+                OpenWebSearch(SearchBox.Text);
+                e.Handled = true;
+            }
+            else if (itemCount > 0)
+            {
+                // Move selection up
+                _selectedSearchIndex--;
+                if (_selectedSearchIndex < 0)
+                {
+                    _selectedSearchIndex = itemCount - 1; // Wrap to last
+                }
+                UpdateSearchResultSelection();
+                e.Handled = true;
+            }
+        }
+        else if (e.Key == Key.Enter)
+        {
+            // Launch selected item or first result
+            LaunchSelectedSearchResult();
+            e.Handled = true;
+        }
+    }
+
+    private void UpdateSearchResultSelection()
+    {
+        for (int i = 0; i < SearchResultsPanel.Items.Count; i++)
+        {
+            if (SearchResultsPanel.Items[i] is Button button)
+            {
+                if (i == _selectedSearchIndex)
+                {
+                    // Apply selected style
+                    button.Style = (Style)FindResource("SearchResultSelectedStyle");
+                }
+                else
+                {
+                    // Apply normal style
+                    button.Style = (Style)FindResource("SearchResultStyle");
+                }
+            }
+        }
+    }
+
+    private void LaunchSelectedSearchResult()
+    {
+        if (SearchResultsPanel.Items.Count == 0) return;
+
+        // If no selection, use first result
+        var indexToLaunch = _selectedSearchIndex >= 0 ? _selectedSearchIndex : 0;
+
+        if (indexToLaunch < SearchResultsPanel.Items.Count && 
+            SearchResultsPanel.Items[indexToLaunch] is Button button)
+        {
+            // Simulate click on the button
+            SearchResult_Click(button, new RoutedEventArgs());
+        }
+    }
+
+    private void OpenWebSearch(string query)
+    {
+        try
+        {
+            var searchUrl = _settingsService.Settings.WebSearchUrl;
+            var encodedQuery = Uri.EscapeDataString(query);
+            var fullUrl = searchUrl + encodedQuery;
+
+            HideMenu();
+
+            var startInfo = new ProcessStartInfo
+            {
+                FileName = fullUrl,
+                UseShellExecute = true
+            };
+
+            Process.Start(startInfo);
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Failed to open web search: {ex.Message}");
+        }
+    }
+
     private Button CreateSearchResultButton(SearchResult result)
     {
-        // Get real icon from IconService
-        var icon = _iconService.GetIcon(result.Path);
+        // For calculation results, use emoji icon; for others, get real icon from IconService
+        var icon = result.Type == SearchResultType.Calculation ? null : _iconService.GetIcon(result.Path);
 
         var iconElement = icon != null
             ? (UIElement)new Image 
@@ -591,10 +945,15 @@ public partial class StartMenuWindow : Window
                 VerticalAlignment = VerticalAlignment.Center 
             };
 
+        // For calculation results, show "Click to copy" hint
+        var pathText = result.Type == SearchResultType.Calculation 
+            ? "Sonucu panoya kopyalamak için tıklayın" 
+            : result.Path;
+
         var button = new Button
         {
             Style = (Style)FindResource("SearchResultStyle"),
-            Tag = result.Path,
+            Tag = result.Type == SearchResultType.Calculation ? result : result.Path,
             Content = new StackPanel
             {
                 Orientation = Orientation.Horizontal,
@@ -607,7 +966,7 @@ public partial class StartMenuWindow : Window
                         Children =
                         {
                             new TextBlock { Text = result.Name, FontSize = 14, Foreground = (Brush)FindResource("TextBrush") },
-                            new TextBlock { Text = result.Path, FontSize = 11, Foreground = (Brush)FindResource("TextSecondaryBrush"), TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = 450 }
+                            new TextBlock { Text = pathText, FontSize = 11, Foreground = (Brush)FindResource("TextSecondaryBrush"), TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = 450 }
                         }
                     }
                 }
@@ -615,7 +974,67 @@ public partial class StartMenuWindow : Window
         };
 
         button.Click += SearchResult_Click;
+        
+        // Add right-click handler for context menu (only for non-calculation results)
+        if (result.Type != SearchResultType.Calculation)
+        {
+            button.MouseRightButtonUp += SearchResult_RightClick;
+        }
+        
         return button;
+    }
+
+    private void SearchResult_RightClick(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is Button button && button.Tag is string path)
+        {
+            ShowSearchResultContextMenu(path, button);
+            e.Handled = true;
+        }
+    }
+
+    private void ShowSearchResultContextMenu(string path, UIElement target)
+    {
+        var contextMenu = new ContextMenu();
+
+        // "Aç" (Open) menu item
+        var openItem = new MenuItem { Header = "Aç" };
+        openItem.Click += (s, args) => LaunchItem(path);
+        contextMenu.Items.Add(openItem);
+
+        // "Dosya konumunu aç" (Open file location) menu item
+        var openLocationItem = new MenuItem { Header = "Dosya konumunu aç" };
+        openLocationItem.Click += (s, args) => OpenFileLocation(path);
+        contextMenu.Items.Add(openLocationItem);
+
+        contextMenu.Items.Add(new Separator());
+
+        // Check if item is already pinned
+        var isPinned = _pinnedItemsService.IsPinned(path);
+
+        if (isPinned)
+        {
+            // "Kaldır" (Remove/Unpin) menu item
+            var unpinItem = new MenuItem { Header = "Kaldır" };
+            unpinItem.Click += (s, args) =>
+            {
+                _pinnedItemsService.RemovePin(path);
+            };
+            contextMenu.Items.Add(unpinItem);
+        }
+        else
+        {
+            // "Pinle" (Pin) menu item
+            var pinItem = new MenuItem { Header = "Pinle" };
+            pinItem.Click += (s, args) =>
+            {
+                _pinnedItemsService.AddPin(path, _currentTabId);
+            };
+            contextMenu.Items.Add(pinItem);
+        }
+
+        contextMenu.PlacementTarget = target;
+        contextMenu.IsOpen = true;
     }
 
     private static string GetFallbackIcon(SearchResultType type)
@@ -625,15 +1044,55 @@ public partial class StartMenuWindow : Window
             SearchResultType.Application => "📦",
             SearchResultType.Folder => "📁",
             SearchResultType.File => "📄",
+            SearchResultType.Calculation => "🔢",
             _ => "📄"
         };
     }
 
     private void SearchResult_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is Button button && button.Tag is string path)
+        if (sender is Button button)
         {
-            LaunchItem(path);
+            // Check if this is a calculation result
+            if (button.Tag is SearchResult result && result.Type == SearchResultType.Calculation)
+            {
+                // Copy the result to clipboard
+                try
+                {
+                    Clipboard.SetText(result.Path); // Path contains the formatted result
+                    
+                    // Show brief feedback by changing button content temporarily
+                    var originalContent = button.Content;
+                    if (button.Content is StackPanel panel && panel.Children.Count > 1 && 
+                        panel.Children[1] is StackPanel textPanel && textPanel.Children.Count > 0 &&
+                        textPanel.Children[0] is TextBlock nameBlock)
+                    {
+                        var originalText = nameBlock.Text;
+                        nameBlock.Text = "✓ Panoya kopyalandı!";
+                        
+                        // Restore after a short delay
+                        Task.Delay(1000).ContinueWith(_ =>
+                        {
+                            Dispatcher.Invoke(() =>
+                            {
+                                if (nameBlock != null)
+                                    nameBlock.Text = originalText;
+                            });
+                        });
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"Failed to copy to clipboard: {ex.Message}");
+                }
+                return;
+            }
+            
+            // Regular search result - launch the item
+            if (button.Tag is string path)
+            {
+                LaunchItem(path);
+            }
         }
     }
 
@@ -682,12 +1141,45 @@ public partial class StartMenuWindow : Window
 
         EmptyState.Visibility = Visibility.Collapsed;
 
+        // Check layout mode
+        var layoutMode = _settingsService.Settings.PinnedItemsLayout;
+
+        if (layoutMode == LayoutMode.FreeForm)
+        {
+            // FreeForm mode: Use Grid for positioning
+            RenderFreeFormLayout(ungroupedItems, groups, currentTabId);
+        }
+        else
+        {
+            // Ordered mode: Use WrapPanel for auto-arrangement
+            RenderOrderedLayout(ungroupedItems, groups, currentTabId);
+        }
+    }
+
+    /// <summary>
+    /// Render items in Ordered layout mode using WrapPanel (auto-arrangement)
+    /// </summary>
+    private void RenderOrderedLayout(List<PinnedItem> ungroupedItems, List<Group> groups, string currentTabId)
+    {
+        var showIconsOnly = _settingsService.Settings.ShowIconsOnly;
+        var itemsPerRow = _settingsService.Settings.ItemsPerRow;
+        // Button size (100 or 60) + margin (4 on each side = 8 total)
+        var itemWidth = showIconsOnly ? 68.0 : 108.0;
+
         // Create a single WrapPanel for both items and group folders
         var mainWrapPanel = new WrapPanel
         {
             Orientation = Orientation.Horizontal,
-            AllowDrop = true
+            AllowDrop = true,
+            HorizontalAlignment = System.Windows.HorizontalAlignment.Left
         };
+
+        // Apply items per row constraint if set
+        if (itemsPerRow > 0)
+        {
+            mainWrapPanel.MaxWidth = itemWidth * itemsPerRow;
+        }
+
         mainWrapPanel.Drop += WrapPanel_Drop;
         mainWrapPanel.DragOver += WrapPanel_DragOver;
 
@@ -706,6 +1198,168 @@ public partial class StartMenuWindow : Window
         }
 
         PinnedItemsContainer.Children.Add(mainWrapPanel);
+    }
+
+    /// <summary>
+    /// Render items in FreeForm layout mode using Grid (user-positioned)
+    /// </summary>
+    private void RenderFreeFormLayout(List<PinnedItem> ungroupedItems, List<Group> groups, string currentTabId)
+    {
+        var showIconsOnly = _settingsService.Settings.ShowIconsOnly;
+        var cellSize = showIconsOnly ? 68 : 108; // Button size + margin
+        
+        // Calculate grid dimensions based on available space
+        var availableWidth = PinnedScrollViewer.ActualWidth > 0 ? PinnedScrollViewer.ActualWidth : 600;
+        var columns = Math.Max(1, (int)(availableWidth / cellSize));
+        
+        // Calculate required rows based on items with positions and items without
+        var itemsWithPositions = ungroupedItems.Where(i => i.GridRow.HasValue && i.GridColumn.HasValue).ToList();
+        var itemsWithoutPositions = ungroupedItems.Where(i => !i.GridRow.HasValue || !i.GridColumn.HasValue).ToList();
+        
+        var maxRow = itemsWithPositions.Any() ? itemsWithPositions.Max(i => i.GridRow!.Value) : -1;
+        var totalItemsCount = ungroupedItems.Count + groups.Count;
+        var minRows = (int)Math.Ceiling((double)totalItemsCount / columns);
+        var rows = Math.Max(minRows, maxRow + 1) + 2; // Extra rows for expansion
+
+        // Create the grid
+        var grid = new Grid
+        {
+            AllowDrop = true,
+            Background = Brushes.Transparent // Needed for drop events
+        };
+        grid.Drop += FreeFormGrid_Drop;
+        grid.DragOver += FreeFormGrid_DragOver;
+
+        // Define columns
+        for (int c = 0; c < columns; c++)
+        {
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(cellSize) });
+        }
+
+        // Define rows
+        for (int r = 0; r < rows; r++)
+        {
+            grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(cellSize) });
+        }
+
+        // Track occupied cells
+        var occupiedCells = new HashSet<(int row, int col)>();
+
+        // Place items with positions first
+        foreach (var item in itemsWithPositions)
+        {
+            var row = item.GridRow!.Value;
+            var col = item.GridColumn!.Value;
+            
+            // Ensure within bounds
+            if (row < rows && col < columns)
+            {
+                var button = CreatePinnedItemButton(item);
+                Grid.SetRow(button, row);
+                Grid.SetColumn(button, col);
+                grid.Children.Add(button);
+                occupiedCells.Add((row, col));
+            }
+        }
+
+        // Auto-place items without positions
+        var nextRow = 0;
+        var nextCol = 0;
+        
+        foreach (var item in itemsWithoutPositions.OrderBy(i => i.Order))
+        {
+            // Find next available cell
+            while (occupiedCells.Contains((nextRow, nextCol)))
+            {
+                nextCol++;
+                if (nextCol >= columns)
+                {
+                    nextCol = 0;
+                    nextRow++;
+                }
+            }
+
+            var button = CreatePinnedItemButton(item);
+            Grid.SetRow(button, nextRow);
+            Grid.SetColumn(button, nextCol);
+            grid.Children.Add(button);
+            occupiedCells.Add((nextRow, nextCol));
+
+            nextCol++;
+            if (nextCol >= columns)
+            {
+                nextCol = 0;
+                nextRow++;
+            }
+        }
+
+        // Place groups
+        foreach (var group in groups.OrderBy(g => g.Order))
+        {
+            // Find next available cell
+            while (occupiedCells.Contains((nextRow, nextCol)))
+            {
+                nextCol++;
+                if (nextCol >= columns)
+                {
+                    nextCol = 0;
+                    nextRow++;
+                }
+            }
+
+            var groupButton = CreateGroupFolderButton(group, currentTabId);
+            Grid.SetRow(groupButton, nextRow);
+            Grid.SetColumn(groupButton, nextCol);
+            grid.Children.Add(groupButton);
+            occupiedCells.Add((nextRow, nextCol));
+
+            nextCol++;
+            if (nextCol >= columns)
+            {
+                nextCol = 0;
+                nextRow++;
+            }
+        }
+
+        PinnedItemsContainer.Children.Add(grid);
+    }
+
+    private void FreeFormGrid_DragOver(object sender, DragEventArgs e)
+    {
+        if (e.Data.GetDataPresent("PinnedItem") || e.Data.GetDataPresent("Group"))
+        {
+            e.Effects = DragDropEffects.Move;
+        }
+        else
+        {
+            e.Effects = DragDropEffects.None;
+        }
+        e.Handled = true;
+    }
+
+    private void FreeFormGrid_Drop(object sender, DragEventArgs e)
+    {
+        if (sender is Grid grid && e.Data.GetDataPresent("PinnedItem"))
+        {
+            var droppedItem = e.Data.GetData("PinnedItem") as PinnedItem;
+            if (droppedItem == null) return;
+
+            // Calculate grid position from drop point
+            var dropPosition = e.GetPosition(grid);
+            var showIconsOnly = _settingsService.Settings.ShowIconsOnly;
+            var cellSize = showIconsOnly ? 68 : 108;
+
+            var gridRow = (int)(dropPosition.Y / cellSize);
+            var gridCol = (int)(dropPosition.X / cellSize);
+
+            // Ensure within bounds
+            gridRow = Math.Max(0, Math.Min(gridRow, grid.RowDefinitions.Count - 1));
+            gridCol = Math.Max(0, Math.Min(gridCol, grid.ColumnDefinitions.Count - 1));
+
+            // Update item position
+            _pinnedItemsService.UpdateItemGridPosition(droppedItem.Id, gridRow, gridCol);
+        }
+        e.Handled = true;
     }
 
     private void ShowGroupContent(Group group, string tabId)
@@ -773,20 +1427,20 @@ public partial class StartMenuWindow : Window
 
     private Button CreateGroupFolderButton(Group group, string tabId)
     {
+        var showIconsOnly = _settingsService.Settings.ShowIconsOnly;
         var itemCount = _pinnedItemsService.GetItemsForTab(tabId, group.Id).Count();
         
-        // Create folder icon with item count preview
-        var folderContent = new StackPanel
-        {
-            HorizontalAlignment = HorizontalAlignment.Center
-        };
+        // Adjust sizes based on icon-only mode
+        var folderSize = showIconsOnly ? 32 : 48;
+        var folderFontSize = showIconsOnly ? 20 : 28;
+        var folderMargin = showIconsOnly ? new Thickness(0) : new Thickness(0, 0, 0, 8);
 
         // Folder visual - show mini previews of first items
         var folderVisual = new Grid
         {
-            Width = 48,
-            Height = 48,
-            Margin = new Thickness(0, 0, 0, 8)
+            Width = folderSize,
+            Height = folderSize,
+            Margin = folderMargin
         };
 
         // Folder background
@@ -803,7 +1457,7 @@ public partial class StartMenuWindow : Window
         var folderIcon = new TextBlock
         {
             Text = "📁",
-            FontSize = 28,
+            FontSize = folderFontSize,
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center
         };
@@ -831,26 +1485,43 @@ public partial class StartMenuWindow : Window
             folderVisual.Children.Add(badge);
         }
 
-        folderContent.Children.Add(folderVisual);
-
-        // Group name
-        folderContent.Children.Add(new TextBlock
+        // Create content based on icon-only mode
+        UIElement buttonContent;
+        if (showIconsOnly)
         {
-            Text = group.Name,
-            FontSize = 12,
-            Foreground = (Brush)FindResource("TextBrush"),
-            TextTrimming = TextTrimming.CharacterEllipsis,
-            MaxWidth = 80,
-            HorizontalAlignment = HorizontalAlignment.Center,
-            TextAlignment = TextAlignment.Center
-        });
+            // Icon only - no text label
+            buttonContent = folderVisual;
+        }
+        else
+        {
+            // Full mode - icon with text label
+            var folderContent = new StackPanel
+            {
+                HorizontalAlignment = HorizontalAlignment.Center
+            };
+            folderContent.Children.Add(folderVisual);
+            folderContent.Children.Add(new TextBlock
+            {
+                Text = group.Name,
+                FontSize = 12,
+                Foreground = (Brush)FindResource("TextBrush"),
+                TextTrimming = TextTrimming.CharacterEllipsis,
+                MaxWidth = 80,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                TextAlignment = TextAlignment.Center
+            });
+            buttonContent = folderContent;
+        }
+
+        // Select appropriate style based on mode
+        var styleName = showIconsOnly ? "PinnedItemIconOnlyStyle" : "PinnedItemStyle";
 
         var button = new Button
         {
-            Style = (Style)FindResource("PinnedItemStyle"),
+            Style = (Style)FindResource(styleName),
             Tag = group,
             ToolTip = $"{group.Name} ({itemCount} öğe)",
-            Content = folderContent,
+            Content = buttonContent,
             AllowDrop = true
         };
 
@@ -874,14 +1545,58 @@ public partial class StartMenuWindow : Window
         button.DragEnter += GroupFolder_DragEnter;
         button.DragLeave += GroupFolder_DragLeave;
 
+        // Drag support for group reordering
+        button.PreviewMouseLeftButtonDown += GroupFolder_PreviewMouseLeftButtonDown;
+        button.PreviewMouseMove += GroupFolder_PreviewMouseMove;
+        button.PreviewMouseLeftButtonUp += GroupFolder_PreviewMouseLeftButtonUp;
+
         return button;
     }
 
     private void GroupFolder_DragOver(object sender, DragEventArgs e)
     {
+        // Handle group reorder drag over
+        if (e.Data.GetDataPresent("Group"))
+        {
+            var droppedGroup = e.Data.GetData("Group") as Group;
+            if (sender is Button btn && btn.Tag is Group targetGroup)
+            {
+                if (droppedGroup != null && droppedGroup.Id != targetGroup.Id)
+                {
+                    e.Effects = DragDropEffects.Move;
+                }
+                else
+                {
+                    e.Effects = DragDropEffects.None;
+                }
+            }
+            else
+            {
+                e.Effects = DragDropEffects.Move;
+            }
+            e.Handled = true;
+            return;
+        }
+
         if (e.Data.GetDataPresent("PinnedItem"))
         {
-            e.Effects = DragDropEffects.Move;
+            // Check if the dragged item is not already in this group
+            var droppedItem = e.Data.GetData("PinnedItem") as PinnedItem;
+            if (sender is Button btn && btn.Tag is Group group)
+            {
+                if (droppedItem != null && droppedItem.GroupId != group.Id)
+                {
+                    e.Effects = DragDropEffects.Move;
+                }
+                else
+                {
+                    e.Effects = DragDropEffects.None;
+                }
+            }
+            else
+            {
+                e.Effects = DragDropEffects.Move;
+            }
         }
         else
         {
@@ -892,14 +1607,67 @@ public partial class StartMenuWindow : Window
 
     private void GroupFolder_DragEnter(object sender, DragEventArgs e)
     {
-        if (e.Data.GetDataPresent("PinnedItem") && sender is Button button)
+        // Handle both PinnedItem and Group drag enter
+        if ((e.Data.GetDataPresent("PinnedItem") || e.Data.GetDataPresent("Group")) && sender is Button button)
         {
-            // Highlight folder when dragging over
-            button.Opacity = 0.7;
+            // For PinnedItem: Check if the dragged item is not already in this group
+            if (e.Data.GetDataPresent("PinnedItem"))
+            {
+                var droppedItem = e.Data.GetData("PinnedItem") as PinnedItem;
+                if (button.Tag is Group group && droppedItem != null && droppedItem.GroupId == group.Id)
+                {
+                    // Item is already in this group, don't highlight
+                    return;
+                }
+            }
             
-            // Scale up slightly to indicate drop target
-            button.RenderTransform = new ScaleTransform(1.1, 1.1);
+            // For Group: Check if it's not the same group
+            if (e.Data.GetDataPresent("Group"))
+            {
+                var droppedGroup = e.Data.GetData("Group") as Group;
+                if (button.Tag is Group targetGroup && droppedGroup != null && droppedGroup.Id == targetGroup.Id)
+                {
+                    // Same group, don't highlight
+                    return;
+                }
+            }
+
+            // Enhanced visual feedback: Scale up and add highlight border
+            var scaleTransform = new ScaleTransform(1.15, 1.15);
+            button.RenderTransform = scaleTransform;
             button.RenderTransformOrigin = new Point(0.5, 0.5);
+
+            // Animate the scale for smooth effect
+            var scaleAnimation = new DoubleAnimation(1.0, 1.15, TimeSpan.FromMilliseconds(150))
+            {
+                EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut }
+            };
+            scaleTransform.BeginAnimation(ScaleTransform.ScaleXProperty, scaleAnimation);
+            scaleTransform.BeginAnimation(ScaleTransform.ScaleYProperty, scaleAnimation);
+
+            // Find the border inside the button template and highlight it
+            if (VisualTreeHelper.GetChildrenCount(button) > 0)
+            {
+                var border = FindVisualChild<Border>(button);
+                if (border != null)
+                {
+                    // Store original values for restoration
+                    button.Tag = new object[] { button.Tag, border.BorderBrush, border.BorderThickness };
+                    
+                    // Apply highlight border
+                    border.BorderBrush = (Brush)FindResource("AccentBrush");
+                    border.BorderThickness = new Thickness(3);
+                }
+            }
+
+            // Add a subtle glow effect
+            button.Effect = new System.Windows.Media.Effects.DropShadowEffect
+            {
+                Color = Colors.DodgerBlue,
+                BlurRadius = 15,
+                ShadowDepth = 0,
+                Opacity = 0.8
+            };
         }
     }
 
@@ -907,30 +1675,184 @@ public partial class StartMenuWindow : Window
     {
         if (sender is Button button)
         {
-            // Remove highlight
-            button.Opacity = 1.0;
+            ResetGroupFolderVisuals(button);
+        }
+    }
+
+    private void ResetGroupFolderVisuals(Button button)
+    {
+        // Animate scale back to normal
+        if (button.RenderTransform is ScaleTransform scaleTransform)
+        {
+            var scaleAnimation = new DoubleAnimation(1.0, TimeSpan.FromMilliseconds(100));
+            scaleTransform.BeginAnimation(ScaleTransform.ScaleXProperty, scaleAnimation);
+            scaleTransform.BeginAnimation(ScaleTransform.ScaleYProperty, scaleAnimation);
+        }
+        else
+        {
             button.RenderTransform = null;
         }
+
+        // Remove glow effect
+        button.Effect = null;
+
+        // Restore original border if we stored it
+        if (button.Tag is object[] tagArray && tagArray.Length == 3)
+        {
+            var originalTag = tagArray[0];
+            var originalBrush = tagArray[1] as Brush;
+            var originalThickness = (Thickness)tagArray[2];
+
+            if (VisualTreeHelper.GetChildrenCount(button) > 0)
+            {
+                var border = FindVisualChild<Border>(button);
+                if (border != null)
+                {
+                    border.BorderBrush = originalBrush;
+                    border.BorderThickness = originalThickness;
+                }
+            }
+
+            // Restore original tag (the Group object)
+            button.Tag = originalTag;
+        }
+    }
+
+    /// <summary>
+    /// Helper method to find a visual child of a specific type
+    /// </summary>
+    private static T? FindVisualChild<T>(DependencyObject parent) where T : DependencyObject
+    {
+        for (int i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
+        {
+            var child = VisualTreeHelper.GetChild(parent, i);
+            if (child is T typedChild)
+            {
+                return typedChild;
+            }
+            var result = FindVisualChild<T>(child);
+            if (result != null)
+            {
+                return result;
+            }
+        }
+        return null;
     }
 
     private void GroupFolder_Drop(object sender, DragEventArgs e)
     {
         if (sender is Button button)
         {
-            // Remove highlight
-            button.Opacity = 1.0;
-            button.RenderTransform = null;
+            // Reset visual feedback
+            ResetGroupFolderVisuals(button);
         }
 
-        if (e.Data.GetDataPresent("PinnedItem") && sender is Button btn && btn.Tag is Group group)
+        // Handle group reorder drop
+        if (e.Data.GetDataPresent("Group") && sender is Button targetBtn)
         {
-            var droppedItem = e.Data.GetData("PinnedItem") as PinnedItem;
-            if (droppedItem != null && droppedItem.GroupId != group.Id)
+            var droppedGroup = e.Data.GetData("Group") as Group;
+            Group? targetGroup = null;
+            
+            if (targetBtn.Tag is Group g)
             {
-                _pinnedItemsService.MoveItemToGroup(droppedItem.Id, group.Id);
+                targetGroup = g;
+            }
+            else if (targetBtn.Tag is object[] tagArray && tagArray.Length > 0 && tagArray[0] is Group arrayGroup)
+            {
+                targetGroup = arrayGroup;
+                targetBtn.Tag = arrayGroup;
+            }
+
+            if (droppedGroup != null && targetGroup != null && droppedGroup.Id != targetGroup.Id)
+            {
+                // Calculate the target index based on the target group's order
+                _pinnedItemsService.MoveGroup(droppedGroup.Id, targetGroup.Order);
+                RefreshPinnedItems();
+            }
+            e.Handled = true;
+            return;
+        }
+
+        if (e.Data.GetDataPresent("PinnedItem") && sender is Button btn)
+        {
+            // Get the group from the tag (handle both direct tag and array tag from DragEnter)
+            Group? group = null;
+            if (btn.Tag is Group g)
+            {
+                group = g;
+            }
+            else if (btn.Tag is object[] tagArray && tagArray.Length > 0 && tagArray[0] is Group arrayGroup)
+            {
+                group = arrayGroup;
+                // Restore the original tag
+                btn.Tag = arrayGroup;
+            }
+
+            if (group != null)
+            {
+                var droppedItem = e.Data.GetData("PinnedItem") as PinnedItem;
+                if (droppedItem != null && droppedItem.GroupId != group.Id)
+                {
+                    // Move the item to the group
+                    _pinnedItemsService.MoveItemToGroup(droppedItem.Id, group.Id);
+                    
+                    // Refresh UI to show the updated state
+                    RefreshPinnedItems();
+                }
             }
         }
         e.Handled = true;
+    }
+
+    private void GroupFolder_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        _dragStartPoint = e.GetPosition(null);
+        _isDragging = false;
+        
+        if (sender is Button button && button.Tag is Group group)
+        {
+            _draggedGroupButton = button;
+            _draggedGroup = group;
+        }
+    }
+
+    private void GroupFolder_PreviewMouseMove(object sender, MouseEventArgs e)
+    {
+        if (e.LeftButton != MouseButtonState.Pressed || _draggedGroup == null || _draggedGroupButton == null)
+            return;
+
+        var currentPos = e.GetPosition(null);
+        var diff = _dragStartPoint - currentPos;
+
+        if (Math.Abs(diff.X) > SystemParameters.MinimumHorizontalDragDistance ||
+            Math.Abs(diff.Y) > SystemParameters.MinimumVerticalDragDistance)
+        {
+            _isDragging = true;
+            
+            // Dim original button during drag
+            _draggedGroupButton.Opacity = 0.3;
+            
+            var data = new DataObject("Group", _draggedGroup);
+            DragDrop.DoDragDrop(_draggedGroupButton, data, DragDropEffects.Move);
+            
+            // Restore opacity after drag
+            if (_draggedGroupButton != null)
+                _draggedGroupButton.Opacity = 1.0;
+            
+            _isDragging = false;
+            _draggedGroup = null;
+            _draggedGroupButton = null;
+        }
+    }
+
+    private void GroupFolder_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        if (_draggedGroupButton != null)
+            _draggedGroupButton.Opacity = 1.0;
+            
+        _isDragging = false;
+        _draggedGroup = null;
+        _draggedGroupButton = null;
     }
 
     private WrapPanel CreateItemsWrapPanel(IEnumerable<PinnedItem> items, string? groupId)
@@ -1028,49 +1950,109 @@ public partial class StartMenuWindow : Window
 
     private Button CreatePinnedItemButton(PinnedItem item)
     {
-        // Get real icon from IconService
-        var icon = _iconService.GetIcon(item.Path);
+        var showIconsOnly = _settingsService.Settings.ShowIconsOnly;
+        
+        // Get real icon from IconService - use special method for internet shortcuts
+        var icon = item.Type == PinnedItemType.InternetShortcut 
+            ? _iconService.GetInternetShortcutIcon(item.Path)
+            : _iconService.GetIcon(item.Path);
+
+        // Adjust icon size based on mode
+        var iconSize = showIconsOnly ? 32 : 40;
+        var iconMargin = showIconsOnly ? new Thickness(0) : new Thickness(0, 0, 0, 8);
+
+        // Determine fallback emoji based on item type
+        var fallbackEmoji = item.Type switch
+        {
+            PinnedItemType.Folder => "📁",
+            PinnedItemType.InternetShortcut => "🌐",
+            _ => "📦"
+        };
 
         var iconElement = icon != null
             ? (UIElement)new Image 
             { 
                 Source = icon, 
-                Width = 40, 
-                Height = 40, 
+                Width = iconSize, 
+                Height = iconSize, 
                 HorizontalAlignment = HorizontalAlignment.Center, 
-                Margin = new Thickness(0, 0, 0, 8) 
+                Margin = iconMargin 
             }
             : (UIElement)new TextBlock 
             { 
-                Text = item.Type == PinnedItemType.Folder ? "📁" : "📦", 
-                FontSize = 32, 
+                Text = fallbackEmoji, 
+                FontSize = showIconsOnly ? 24 : 32, 
                 HorizontalAlignment = HorizontalAlignment.Center, 
-                Margin = new Thickness(0, 0, 0, 8) 
+                Margin = iconMargin 
             };
 
-        var button = new Button
+        // Create content based on icon-only mode
+        UIElement buttonContent;
+        if (showIconsOnly)
         {
-            Style = (Style)FindResource("PinnedItemStyle"),
-            Tag = item,
-            ToolTip = item.Path,
-            Content = new StackPanel
+            // Icon only - no text label
+            buttonContent = iconElement;
+        }
+        else
+        {
+            // Full mode - icon with text label
+            var nameTextBlock = new TextBlock 
+            { 
+                Text = item.DisplayName, 
+                FontSize = 12, 
+                Foreground = (Brush)FindResource("TextBrush"), 
+                TextTrimming = TextTrimming.CharacterEllipsis, 
+                MaxWidth = 80, 
+                HorizontalAlignment = HorizontalAlignment.Center, 
+                TextAlignment = TextAlignment.Center 
+            };
+            
+            var renameTextBox = new TextBox
+            {
+                Text = item.DisplayName,
+                FontSize = 12,
+                MaxWidth = 80,
+                MinWidth = 60,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                TextAlignment = TextAlignment.Center,
+                Visibility = Visibility.Collapsed,
+                Background = new SolidColorBrush(Color.FromRgb(45, 45, 45)),
+                Foreground = Brushes.White,
+                BorderBrush = new SolidColorBrush(Color.FromRgb(0, 120, 215)),
+                BorderThickness = new Thickness(1),
+                Padding = new Thickness(2, 1, 2, 1)
+            };
+            renameTextBox.Tag = new object[] { item, nameTextBlock };
+            renameTextBox.KeyDown += RenameTextBox_KeyDown;
+            renameTextBox.LostFocus += RenameTextBox_LostFocus;
+            
+            var nameContainer = new Grid
+            {
+                HorizontalAlignment = HorizontalAlignment.Center
+            };
+            nameContainer.Children.Add(nameTextBlock);
+            nameContainer.Children.Add(renameTextBox);
+            
+            buttonContent = new StackPanel
             {
                 HorizontalAlignment = HorizontalAlignment.Center,
                 Children =
                 {
                     iconElement,
-                    new TextBlock 
-                    { 
-                        Text = item.Name, 
-                        FontSize = 12, 
-                        Foreground = (Brush)FindResource("TextBrush"), 
-                        TextTrimming = TextTrimming.CharacterEllipsis, 
-                        MaxWidth = 80, 
-                        HorizontalAlignment = HorizontalAlignment.Center, 
-                        TextAlignment = TextAlignment.Center 
-                    }
+                    nameContainer
                 }
-            }
+            };
+        }
+
+        // Select appropriate style based on mode
+        var styleName = showIconsOnly ? "PinnedItemIconOnlyStyle" : "PinnedItemStyle";
+
+        var button = new Button
+        {
+            Style = (Style)FindResource(styleName),
+            Tag = item,
+            ToolTip = item.Path,
+            Content = buttonContent
         };
 
         button.Click += PinnedItem_Click;
@@ -1139,7 +2121,7 @@ public partial class StartMenuWindow : Window
 
     private void WrapPanel_DragOver(object sender, DragEventArgs e)
     {
-        if (e.Data.GetDataPresent("PinnedItem"))
+        if (e.Data.GetDataPresent("PinnedItem") || e.Data.GetDataPresent("Group"))
         {
             e.Effects = DragDropEffects.Move;
         }
@@ -1152,16 +2134,31 @@ public partial class StartMenuWindow : Window
 
     private void WrapPanel_Drop(object sender, DragEventArgs e)
     {
-        if (e.Data.GetDataPresent("PinnedItem") && sender is WrapPanel wrapPanel)
+        // Handle group reorder drop on WrapPanel
+        if (e.Data.GetDataPresent("Group") && sender is WrapPanel wrapPanel)
+        {
+            var droppedGroup = e.Data.GetData("Group") as Group;
+            if (droppedGroup == null) return;
+
+            var dropPosition = e.GetPosition(wrapPanel);
+            var dropIndex = GetGroupDropIndex(wrapPanel, dropPosition);
+            
+            _pinnedItemsService.MoveGroup(droppedGroup.Id, dropIndex);
+            RefreshPinnedItems();
+            e.Handled = true;
+            return;
+        }
+
+        if (e.Data.GetDataPresent("PinnedItem") && sender is WrapPanel wp)
         {
             var droppedItem = e.Data.GetData("PinnedItem") as PinnedItem;
             if (droppedItem == null) return;
 
-            var groupId = wrapPanel.Tag as string;
-            var dropPosition = e.GetPosition(wrapPanel);
+            var groupId = wp.Tag as string;
+            var dropPosition = e.GetPosition(wp);
             
             // Find drop index based on position
-            var dropIndex = GetDropIndex(wrapPanel, dropPosition);
+            var dropIndex = GetDropIndex(wp, dropPosition);
 
             // Move item
             if (droppedItem.GroupId != groupId)
@@ -1172,6 +2169,29 @@ public partial class StartMenuWindow : Window
             _pinnedItemsService.MoveItem(droppedItem.Id, dropIndex, _currentTabId, groupId);
         }
         e.Handled = true;
+    }
+
+    private int GetGroupDropIndex(WrapPanel wrapPanel, Point dropPosition)
+    {
+        int groupIndex = 0;
+        for (int i = 0; i < wrapPanel.Children.Count; i++)
+        {
+            var child = wrapPanel.Children[i];
+            
+            // Only consider group folder buttons
+            if (child is Button btn && btn.Tag is Group)
+            {
+                var childPos = child.TranslatePoint(new Point(0, 0), wrapPanel);
+                var childRect = new Rect(childPos, new Size(((FrameworkElement)child).ActualWidth, ((FrameworkElement)child).ActualHeight));
+                
+                if (dropPosition.X < childRect.Left + childRect.Width / 2)
+                {
+                    return groupIndex;
+                }
+                groupIndex++;
+            }
+        }
+        return groupIndex;
     }
 
     private int GetDropIndex(WrapPanel wrapPanel, Point dropPosition)
@@ -1321,6 +2341,10 @@ public partial class StartMenuWindow : Window
             var openLocationItem = new MenuItem { Header = "Dosya konumunu aç" };
             openLocationItem.Click += (s, args) => OpenFileLocation(item.Path);
 
+            // Rename menu item
+            var renameItem = new MenuItem { Header = "Yeniden Adlandır" };
+            renameItem.Click += (s, args) => StartInlineRename(button, item);
+
             // Move to group submenu
             var moveToGroupMenu = new MenuItem { Header = "Gruba Taşı" };
             
@@ -1365,6 +2389,8 @@ public partial class StartMenuWindow : Window
             contextMenu.Items.Add(openItem);
             contextMenu.Items.Add(openLocationItem);
             contextMenu.Items.Add(new Separator());
+            contextMenu.Items.Add(renameItem);
+            contextMenu.Items.Add(new Separator());
             contextMenu.Items.Add(moveToGroupMenu);
             contextMenu.Items.Add(moveToTabMenu);
             contextMenu.Items.Add(new Separator());
@@ -1385,6 +2411,23 @@ public partial class StartMenuWindow : Window
         {
             HideMenu();
 
+            // For .url files (internet shortcuts), extract the URL and open it directly
+            if (path.EndsWith(".url", StringComparison.OrdinalIgnoreCase) && System.IO.File.Exists(path))
+            {
+                var url = ExtractUrlFromShortcut(path);
+                if (!string.IsNullOrEmpty(url))
+                {
+                    var urlStartInfo = new ProcessStartInfo
+                    {
+                        FileName = url,
+                        UseShellExecute = true
+                    };
+                    Process.Start(urlStartInfo);
+                    return;
+                }
+            }
+
+            // Standard launch for other files
             var startInfo = new ProcessStartInfo
             {
                 FileName = path,
@@ -1400,6 +2443,29 @@ public partial class StartMenuWindow : Window
         }
     }
 
+    /// <summary>
+    /// Extracts the URL from an internet shortcut (.url) file
+    /// </summary>
+    private string? ExtractUrlFromShortcut(string urlFilePath)
+    {
+        try
+        {
+            var lines = System.IO.File.ReadAllLines(urlFilePath);
+            foreach (var line in lines)
+            {
+                if (line.StartsWith("URL=", StringComparison.OrdinalIgnoreCase))
+                {
+                    return line.Substring("URL=".Length).Trim();
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Failed to extract URL from shortcut: {ex.Message}");
+        }
+        return null;
+    }
+
     private void OpenFileLocation(string path)
     {
         try
@@ -1413,6 +2479,459 @@ public partial class StartMenuWindow : Window
         catch (Exception ex)
         {
             Debug.WriteLine($"Failed to open location: {ex.Message}");
+        }
+    }
+
+    private void StartInlineRename(Button button, PinnedItem item)
+    {
+        // Cancel any existing rename operation
+        CancelInlineRename();
+        
+        // Find the TextBlock and TextBox within the button
+        if (button.Content is StackPanel stackPanel)
+        {
+            foreach (var child in stackPanel.Children)
+            {
+                if (child is Grid nameContainer)
+                {
+                    TextBlock? textBlock = null;
+                    TextBox? textBox = null;
+                    
+                    foreach (var gridChild in nameContainer.Children)
+                    {
+                        if (gridChild is TextBlock tb) textBlock = tb;
+                        if (gridChild is TextBox tbx) textBox = tbx;
+                    }
+                    
+                    if (textBlock != null && textBox != null)
+                    {
+                        _activeRenameTextBlock = textBlock;
+                        _activeRenameTextBox = textBox;
+                        _renamingItem = item;
+                        
+                        // Switch to edit mode
+                        textBlock.Visibility = Visibility.Collapsed;
+                        textBox.Text = item.DisplayName;
+                        textBox.Visibility = Visibility.Visible;
+                        textBox.SelectAll();
+                        textBox.Focus();
+                    }
+                    break;
+                }
+            }
+        }
+    }
+    
+    private void RenameTextBox_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (sender is not TextBox textBox) return;
+        
+        if (e.Key == Key.Enter)
+        {
+            CommitInlineRename(textBox);
+            e.Handled = true;
+        }
+        else if (e.Key == Key.Escape)
+        {
+            CancelInlineRename();
+            e.Handled = true;
+        }
+    }
+    
+    private void RenameTextBox_LostFocus(object sender, RoutedEventArgs e)
+    {
+        if (sender is TextBox textBox && _activeRenameTextBox == textBox)
+        {
+            CommitInlineRename(textBox);
+        }
+    }
+    
+    private void CommitInlineRename(TextBox textBox)
+    {
+        if (textBox.Tag is object[] tagData && tagData.Length >= 2 && 
+            tagData[0] is PinnedItem item && tagData[1] is TextBlock textBlock)
+        {
+            var newName = textBox.Text?.Trim();
+            if (!string.IsNullOrWhiteSpace(newName))
+            {
+                // If the new name is the same as the original file name, clear CustomName
+                if (newName == item.Name)
+                {
+                    item.CustomName = null;
+                }
+                else
+                {
+                    item.CustomName = newName;
+                }
+                
+                // Update the TextBlock with the new name
+                textBlock.Text = item.DisplayName;
+                _pinnedItemsService.UpdatePinnedItem(item);
+            }
+            
+            // Switch back to display mode
+            textBox.Visibility = Visibility.Collapsed;
+            textBlock.Visibility = Visibility.Visible;
+        }
+        
+        _activeRenameTextBox = null;
+        _activeRenameTextBlock = null;
+        _renamingItem = null;
+    }
+    
+    private void CancelInlineRename()
+    {
+        if (_activeRenameTextBox != null && _activeRenameTextBlock != null)
+        {
+            _activeRenameTextBox.Visibility = Visibility.Collapsed;
+            _activeRenameTextBlock.Visibility = Visibility.Visible;
+        }
+        
+        _activeRenameTextBox = null;
+        _activeRenameTextBlock = null;
+        _renamingItem = null;
+    }
+
+    #endregion
+
+    private void SettingsButton_Click(object sender, RoutedEventArgs e)
+    {
+        SwitchToSettingsView();
+    }
+
+    private void SwitchToSettingsView()
+    {
+        // Hide other views
+        PinnedItemsView.Visibility = Visibility.Collapsed;
+        SearchView.Visibility = Visibility.Collapsed;
+        SettingsView.Visibility = Visibility.Visible;
+        _isInSearchMode = false;
+        
+        // Load current settings into controls
+        LoadSettingsIntoControls();
+    }
+
+    private void LoadSettingsIntoControls()
+    {
+        var settings = _settingsService.Settings;
+        
+        // Icons Only
+        IconsOnlyCheckBox.IsChecked = settings.ShowIconsOnly;
+        
+        // Transparency
+        TransparencySlider.Value = settings.MenuTransparency * 100;
+        TransparencyLabel.Text = $"Menü saydamlığı: {(int)(settings.MenuTransparency * 100)}%";
+        
+        // Layout Mode
+        LayoutModeComboBox.SelectedIndex = settings.PinnedItemsLayout == LayoutMode.Ordered ? 0 : 1;
+        
+        // Web Search URL
+        WebSearchUrlTextBox.Text = settings.WebSearchUrl;
+
+        // Animations
+        AnimationsCheckBox.IsChecked = settings.EnableAnimations;
+
+        // Position
+        PositionComboBox.SelectedIndex = settings.Position == MenuPosition.Left ? 0 : 1;
+
+        // Size
+        SizeComboBox.SelectedIndex = settings.Size switch
+        {
+            MenuSize.Normal => 0,
+            MenuSize.Large => 1,
+            MenuSize.Fullscreen => 2,
+            MenuSize.Custom => 3,
+            _ => 0
+        };
+        CustomSizePanel.Visibility = settings.Size == MenuSize.Custom ? Visibility.Visible : Visibility.Collapsed;
+        CustomWidthTextBox.Text = settings.CustomWidth.ToString();
+        CustomHeightTextBox.Text = settings.CustomHeight.ToString();
+
+        // Items Per Row
+        ItemsPerRowSlider.Value = settings.ItemsPerRow;
+        ItemsPerRowLabel.Text = settings.ItemsPerRow == 0 
+            ? "Satır başına öğe: Otomatik" 
+            : $"Satır başına öğe: {settings.ItemsPerRow}";
+
+        // Override Windows Key
+        OverrideWinKeyCheckBox.IsChecked = settings.OverrideWindowsStartButton;
+
+        // Hotkey - update display only
+        UpdateHotkeyDisplayText();
+    }
+
+    private void SettingsBackButton_Click(object sender, RoutedEventArgs e)
+    {
+        SwitchToPinnedView();
+    }
+
+    private void IconsOnlyCheckBox_Changed(object sender, RoutedEventArgs e)
+    {
+        if (IconsOnlyCheckBox.IsChecked.HasValue)
+        {
+            _settingsService.UpdateSetting(nameof(AppSettings.ShowIconsOnly), IconsOnlyCheckBox.IsChecked.Value);
+        }
+    }
+
+    private void TransparencySlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (TransparencyLabel != null && _settingsService != null)
+        {
+            var value = e.NewValue / 100.0;
+            TransparencyLabel.Text = $"Menü saydamlığı: {(int)e.NewValue}%";
+            _settingsService.UpdateSetting(nameof(AppSettings.MenuTransparency), value);
+        }
+    }
+
+    private void LayoutModeComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (LayoutModeComboBox.SelectedItem is ComboBoxItem item && item.Tag is string modeStr)
+        {
+            var mode = modeStr == "Ordered" ? LayoutMode.Ordered : LayoutMode.FreeForm;
+            var previousMode = _settingsService.Settings.PinnedItemsLayout;
+            
+            // When switching from FreeForm to Ordered, clear grid positions
+            if (previousMode == LayoutMode.FreeForm && mode == LayoutMode.Ordered)
+            {
+                foreach (var tab in _pinnedItemsService.Tabs)
+                {
+                    _pinnedItemsService.ClearGridPositionsForTab(tab.Id);
+                }
+            }
+            
+            _settingsService.UpdateSetting(nameof(AppSettings.PinnedItemsLayout), mode);
+        }
+    }
+
+    private void WebSearchUrlTextBox_LostFocus(object sender, RoutedEventArgs e)
+    {
+        var url = WebSearchUrlTextBox.Text?.Trim();
+        if (!string.IsNullOrEmpty(url))
+        {
+            _settingsService.UpdateSetting(nameof(AppSettings.WebSearchUrl), url);
+        }
+    }
+
+    #region New Settings Event Handlers
+
+    private void AnimationsCheckBox_Changed(object sender, RoutedEventArgs e)
+    {
+        if (AnimationsCheckBox.IsChecked.HasValue)
+        {
+            _settingsService.UpdateSetting(nameof(AppSettings.EnableAnimations), AnimationsCheckBox.IsChecked.Value);
+        }
+    }
+
+    private void PositionComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (PositionComboBox.SelectedItem is ComboBoxItem item && item.Tag is string posStr)
+        {
+            var position = posStr == "Left" ? MenuPosition.Left : MenuPosition.Center;
+            _settingsService.UpdateSetting(nameof(AppSettings.Position), position);
+            PositionWindow(); // Apply immediately
+        }
+    }
+
+    private void SizeComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (SizeComboBox.SelectedItem is ComboBoxItem item && item.Tag is string sizeStr)
+        {
+            var size = sizeStr switch
+            {
+                "Normal" => MenuSize.Normal,
+                "Large" => MenuSize.Large,
+                "Fullscreen" => MenuSize.Fullscreen,
+                "Custom" => MenuSize.Custom,
+                _ => MenuSize.Normal
+            };
+            
+            CustomSizePanel.Visibility = size == MenuSize.Custom ? Visibility.Visible : Visibility.Collapsed;
+            _settingsService.UpdateSetting(nameof(AppSettings.Size), size);
+            PositionWindow(); // Apply immediately
+        }
+    }
+
+    private void CustomSizeTextBox_LostFocus(object sender, RoutedEventArgs e)
+    {
+        if (int.TryParse(CustomWidthTextBox.Text, out int width))
+        {
+            _settingsService.UpdateSetting(nameof(AppSettings.CustomWidth), Math.Clamp(width, 400, 2000));
+        }
+        if (int.TryParse(CustomHeightTextBox.Text, out int height))
+        {
+            _settingsService.UpdateSetting(nameof(AppSettings.CustomHeight), Math.Clamp(height, 400, 2000));
+        }
+        PositionWindow(); // Apply immediately
+    }
+
+    private void ItemsPerRowSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (ItemsPerRowLabel != null && _settingsService != null)
+        {
+            var value = (int)e.NewValue;
+            ItemsPerRowLabel.Text = value == 0 
+                ? "Satır başına öğe: Otomatik" 
+                : $"Satır başına öğe: {value}";
+            _settingsService.UpdateSetting(nameof(AppSettings.ItemsPerRow), value);
+            RefreshPinnedItems(); // Apply immediately
+        }
+    }
+
+    private void OverrideWinKeyCheckBox_Changed(object sender, RoutedEventArgs e)
+    {
+        if (OverrideWinKeyCheckBox.IsChecked.HasValue)
+        {
+            _settingsService.UpdateSetting(nameof(AppSettings.OverrideWindowsStartButton), OverrideWinKeyCheckBox.IsChecked.Value);
+        }
+    }
+
+    // Hotkey assignment state
+    private bool _isAssigningHotkey = false;
+    private HotkeyConfig? _pendingHotkey = null;
+
+    private void HotkeyAssignButton_Click(object sender, RoutedEventArgs e)
+    {
+        // Start assignment
+        StartHotkeyAssignment();
+    }
+
+    private void HotkeySaveButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_pendingHotkey != null && 
+            (_pendingHotkey.UseWinKey || _pendingHotkey.Ctrl || _pendingHotkey.Alt || _pendingHotkey.Shift || _pendingHotkey.KeyCode > 0))
+        {
+            // Save the hotkey
+            _settingsService.UpdateSetting(nameof(AppSettings.OpenMenuHotkey), _pendingHotkey);
+        }
+        CancelHotkeyAssignment();
+    }
+
+    private void HotkeyCancelButton_Click(object sender, RoutedEventArgs e)
+    {
+        CancelHotkeyAssignment();
+    }
+
+    private void StartHotkeyAssignment()
+    {
+        _isAssigningHotkey = true;
+        _pendingHotkey = new HotkeyConfig { UseWinKey = false };
+        
+        // Suppress Win key and listen for key presses from hook
+        App.Instance.KeyboardHookService.SuppressWinKey = true;
+        App.Instance.KeyboardHookService.KeyPressedForAssignment += OnKeyPressedForAssignment;
+        
+        HotkeyAssignButton.Visibility = Visibility.Collapsed;
+        HotkeySaveButton.Visibility = Visibility.Visible;
+        HotkeyCancelButton.Visibility = Visibility.Visible;
+        
+        HotkeyDisplayBorder.Background = new SolidColorBrush(Color.FromArgb(0x30, 0xFF, 0xFF, 0x00));
+        HotkeyDisplayText.Text = "Tuş kombinasyonuna basın...";
+        HotkeyDisplayText.Foreground = new SolidColorBrush(Colors.Yellow);
+        HotkeyInstructionText.Text = "Kısayol tuşlarına aynı anda basın (Win, Ctrl, Alt, Shift ve bir tuş). Kaydet ile uygulayın.";
+        HotkeyInstructionText.Visibility = Visibility.Visible;
+        
+        // Focus to capture key events
+        this.Focus();
+    }
+
+    private void CancelHotkeyAssignment()
+    {
+        _isAssigningHotkey = false;
+        _pendingHotkey = null;
+        
+        // Re-enable Win key and unsubscribe from event
+        App.Instance.KeyboardHookService.KeyPressedForAssignment -= OnKeyPressedForAssignment;
+        App.Instance.KeyboardHookService.SuppressWinKey = false;
+        
+        HotkeyAssignButton.Visibility = Visibility.Visible;
+        HotkeySaveButton.Visibility = Visibility.Collapsed;
+        HotkeyCancelButton.Visibility = Visibility.Collapsed;
+        
+        HotkeyDisplayBorder.Background = new SolidColorBrush(Color.FromArgb(0x10, 0xFF, 0xFF, 0xFF));
+        HotkeyInstructionText.Visibility = Visibility.Collapsed;
+        UpdateHotkeyDisplayText();
+    }
+
+    private void OnKeyPressedForAssignment(object? sender, KeyPressedEventArgs e)
+    {
+        // This is called from the keyboard hook, need to dispatch to UI thread
+        Dispatcher.Invoke(() =>
+        {
+            if (!_isAssigningHotkey || _pendingHotkey == null) return;
+
+            // Update pending hotkey
+            _pendingHotkey.UseWinKey = e.IsWinKey;
+            _pendingHotkey.Ctrl = e.IsCtrlPressed;
+            _pendingHotkey.Alt = e.IsAltPressed;
+            _pendingHotkey.Shift = e.IsShiftPressed;
+
+            // Check if it's a non-modifier key
+            int vk = e.VirtualKeyCode;
+            const int VK_LWIN = 0x5B, VK_RWIN = 0x5C;
+            const int VK_LCONTROL = 0xA2, VK_RCONTROL = 0xA3;
+            const int VK_LMENU = 0xA4, VK_RMENU = 0xA5;
+            const int VK_LSHIFT = 0xA0, VK_RSHIFT = 0xA1;
+            const int VK_CONTROL = 0x11, VK_MENU = 0x12, VK_SHIFT = 0x10;
+
+            bool isModifierKey = vk == VK_LWIN || vk == VK_RWIN ||
+                                 vk == VK_LCONTROL || vk == VK_RCONTROL || vk == VK_CONTROL ||
+                                 vk == VK_LMENU || vk == VK_RMENU || vk == VK_MENU ||
+                                 vk == VK_LSHIFT || vk == VK_RSHIFT || vk == VK_SHIFT;
+
+            if (!isModifierKey)
+            {
+                _pendingHotkey.KeyCode = vk;
+            }
+
+            UpdatePendingHotkeyDisplay();
+        });
+    }
+
+    private void HandleHotkeyAssignmentKeyDown(KeyEventArgs e)
+    {
+        if (!_isAssigningHotkey || _pendingHotkey == null) return;
+
+        var key = e.Key == Key.System ? e.SystemKey : e.Key;
+        
+        // Handle Escape to cancel
+        if (key == Key.Escape)
+        {
+            CancelHotkeyAssignment();
+            e.Handled = true;
+            return;
+        }
+
+        // The rest is now handled by OnKeyPressedForAssignment via the keyboard hook
+        e.Handled = true;
+    }
+
+    private void UpdatePendingHotkeyDisplay()
+    {
+        if (_pendingHotkey == null) return;
+        
+        var display = _pendingHotkey.ToString();
+        if (string.IsNullOrEmpty(display) || display == "Win" && !_pendingHotkey.UseWinKey)
+        {
+            display = "Tuş kombinasyonuna basın...";
+        }
+        HotkeyDisplayText.Text = display;
+    }
+
+    private void UpdateHotkeyDisplayText()
+    {
+        if (HotkeyDisplayText == null || _settingsService == null) return;
+        
+        var hotkey = _settingsService.Settings.OpenMenuHotkey ?? new HotkeyConfig();
+        HotkeyDisplayText.Text = hotkey.ToString();
+        HotkeyDisplayText.Foreground = (Brush)FindResource("TextBrush");
+    }
+
+    private void ThemeColor_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button button && button.Tag is string colorHex)
+        {
+            _settingsService.UpdateSetting(nameof(AppSettings.AccentColor), colorHex);
+            App.Instance.ApplyThemeColor(colorHex);
         }
     }
 

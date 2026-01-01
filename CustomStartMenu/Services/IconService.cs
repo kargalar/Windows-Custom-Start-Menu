@@ -165,6 +165,80 @@ public class IconService
     /// </summary>
     public ImageSource? GetDefaultFileIcon() => _defaultFileIcon;
 
+    /// <summary>
+    /// Get icon for an internet shortcut (.url file)
+    /// Tries to extract the icon specified in the .url file, falls back to default browser icon
+    /// </summary>
+    public ImageSource? GetInternetShortcutIcon(string urlFilePath, bool largeIcon = true)
+    {
+        if (string.IsNullOrWhiteSpace(urlFilePath) || !File.Exists(urlFilePath))
+            return GetDefaultBrowserIcon(largeIcon);
+
+        var cacheKey = $"url_{urlFilePath}_{(largeIcon ? "L" : "S")}";
+        if (_iconCache.TryGetValue(cacheKey, out var cachedIcon))
+            return cachedIcon;
+
+        ImageSource? icon = null;
+
+        try
+        {
+            // Try to read IconFile from the .url file
+            var lines = File.ReadAllLines(urlFilePath);
+            string? iconFile = null;
+            int iconIndex = 0;
+
+            foreach (var line in lines)
+            {
+                if (line.StartsWith("IconFile=", StringComparison.OrdinalIgnoreCase))
+                {
+                    iconFile = line.Substring("IconFile=".Length).Trim();
+                }
+                else if (line.StartsWith("IconIndex=", StringComparison.OrdinalIgnoreCase))
+                {
+                    int.TryParse(line.Substring("IconIndex=".Length).Trim(), out iconIndex);
+                }
+            }
+
+            // If IconFile is specified and exists, extract icon from it
+            if (!string.IsNullOrEmpty(iconFile) && File.Exists(iconFile))
+            {
+                icon = GetFileIcon(iconFile, largeIcon);
+            }
+
+            // If no icon found, try to get icon from the .url file itself via shell
+            if (icon == null)
+            {
+                icon = GetIconFromShell(urlFilePath, false, largeIcon);
+            }
+        }
+        catch
+        {
+            // Fall back to default browser icon
+        }
+
+        icon ??= GetDefaultBrowserIcon(largeIcon);
+        _iconCache[cacheKey] = icon;
+        return icon;
+    }
+
+    /// <summary>
+    /// Get the default browser icon
+    /// </summary>
+    public ImageSource? GetDefaultBrowserIcon(bool largeIcon = true)
+    {
+        var cacheKey = $"browser_{(largeIcon ? "L" : "S")}";
+        if (_extensionCache.TryGetValue(cacheKey, out var cachedIcon))
+            return cachedIcon;
+
+        // Try to get icon for .html files (associated with default browser)
+        var icon = GetIconFromShell(".html", false, largeIcon);
+        icon ??= GetIconFromShell(".htm", false, largeIcon);
+        icon ??= _defaultAppIcon;
+
+        _extensionCache[cacheKey] = icon;
+        return icon;
+    }
+
     private ImageSource? GetFileIcon(string filePath, bool largeIcon)
     {
         try

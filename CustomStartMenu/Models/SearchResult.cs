@@ -16,5 +16,6 @@ public enum SearchResultType
     Application,
     Folder,
     File,
-    Setting
+    Setting,
+    Calculation
 }

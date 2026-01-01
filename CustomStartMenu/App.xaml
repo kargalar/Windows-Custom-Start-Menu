@@ -22,18 +22,171 @@
                 </tb:TaskbarIcon.ContextMenu>
             </tb:TaskbarIcon>
 
-            <!-- Colors -->
+            <!-- Colors - Using DynamicResource for runtime theming -->
             <Color x:Key="MenuBackgroundColor">#E6202020</Color>
             <Color x:Key="MenuBorderColor">#404040</Color>
             <Color x:Key="AccentColor">#0078D4</Color>
             <Color x:Key="TextColor">#FFFFFF</Color>
             <Color x:Key="TextSecondaryColor">#A0A0A0</Color>
 
-            <SolidColorBrush x:Key="MenuBackgroundBrush" Color="{StaticResource MenuBackgroundColor}"/>
-            <SolidColorBrush x:Key="MenuBorderBrush" Color="{StaticResource MenuBorderColor}"/>
-            <SolidColorBrush x:Key="AccentBrush" Color="{StaticResource AccentColor}"/>
-            <SolidColorBrush x:Key="TextBrush" Color="{StaticResource TextColor}"/>
-            <SolidColorBrush x:Key="TextSecondaryBrush" Color="{StaticResource TextSecondaryColor}"/>
+            <SolidColorBrush x:Key="MenuBackgroundBrush" Color="{DynamicResource MenuBackgroundColor}"/>
+            <SolidColorBrush x:Key="MenuBorderBrush" Color="{DynamicResource MenuBorderColor}"/>
+            <SolidColorBrush x:Key="AccentBrush" Color="{DynamicResource AccentColor}"/>
+            <SolidColorBrush x:Key="TextBrush" Color="{DynamicResource TextColor}"/>
+            <SolidColorBrush x:Key="TextSecondaryBrush" Color="{DynamicResource TextSecondaryColor}"/>
+
+            <!-- Preset Theme Colors -->
+            <Color x:Key="AccentBlue">#0078D4</Color>
+            <Color x:Key="AccentPurple">#8B5CF6</Color>
+            <Color x:Key="AccentPink">#EC4899</Color>
+            <Color x:Key="AccentRed">#EF4444</Color>
+            <Color x:Key="AccentOrange">#F97316</Color>
+            <Color x:Key="AccentYellow">#EAB308</Color>
+            <Color x:Key="AccentGreen">#22C55E</Color>
+            <Color x:Key="AccentTeal">#14B8A6</Color>
+            <Color x:Key="AccentCyan">#06B6D4</Color>
+            <Color x:Key="AccentGray">#6B7280</Color>
+
+            <!-- Context Menu Style -->
+            <Style TargetType="ContextMenu">
+                <Setter Property="Background" Value="#E6202020"/>
+                <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+                <Setter Property="BorderBrush" Value="#404040"/>
+                <Setter Property="BorderThickness" Value="1"/>
+                <Setter Property="Padding" Value="4"/>
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="ContextMenu">
+                            <Border Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}"
+                                    CornerRadius="8"
+                                    Padding="{TemplateBinding Padding}">
+                                <Border.Effect>
+                                    <DropShadowEffect BlurRadius="20" ShadowDepth="0" Opacity="0.5" Color="Black"/>
+                                </Border.Effect>
+                                <StackPanel IsItemsHost="True" KeyboardNavigation.DirectionalNavigation="Cycle"/>
+                            </Border>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
+            <!-- MenuItem Style -->
+            <Style TargetType="MenuItem">
+                <Setter Property="Background" Value="Transparent"/>
+                <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+                <Setter Property="Padding" Value="12,8"/>
+                <Setter Property="Margin" Value="0"/>
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="MenuItem">
+                            <Grid>
+                                <Border x:Name="Border"
+                                        Background="{TemplateBinding Background}"
+                                        CornerRadius="4"
+                                        Padding="{TemplateBinding Padding}"
+                                        Margin="2">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" SharedSizeGroup="Icon"/>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto" SharedSizeGroup="Arrow"/>
+                                        </Grid.ColumnDefinitions>
+                                        
+                                        <!-- Icon placeholder -->
+                                        <ContentPresenter x:Name="Icon"
+                                                          Grid.Column="0"
+                                                          Content="{TemplateBinding Icon}"
+                                                          VerticalAlignment="Center"
+                                                          Margin="0,0,8,0"/>
+                                        
+                                        <!-- Header text -->
+                                        <ContentPresenter Grid.Column="1"
+                                                          ContentSource="Header"
+                                                          VerticalAlignment="Center"
+                                                          RecognizesAccessKey="True"/>
+                                        
+                                        <!-- Submenu arrow -->
+                                        <Path x:Name="SubMenuArrow"
+                                              Grid.Column="2"
+                                              Data="M0,0 L4,4 L0,8 Z"
+                                              Fill="{StaticResource TextSecondaryBrush}"
+                                              VerticalAlignment="Center"
+                                              Margin="8,0,0,0"
+                                              Visibility="Collapsed"/>
+                                    </Grid>
+                                </Border>
+                                
+                                <!-- Submenu Popup -->
+                                <Popup x:Name="PART_Popup"
+                                       AllowsTransparency="True"
+                                       IsOpen="{Binding IsSubmenuOpen, RelativeSource={RelativeSource TemplatedParent}}"
+                                       Placement="Right"
+                                       Focusable="False"
+                                       PopupAnimation="Fade">
+                                    <Border Background="#E6202020"
+                                            BorderBrush="#404040"
+                                            BorderThickness="1"
+                                            CornerRadius="8"
+                                            Padding="4"
+                                            Margin="4">
+                                        <Border.Effect>
+                                            <DropShadowEffect BlurRadius="20" ShadowDepth="0" Opacity="0.5" Color="Black"/>
+                                        </Border.Effect>
+                                        <StackPanel IsItemsHost="True" KeyboardNavigation.DirectionalNavigation="Cycle"/>
+                                    </Border>
+                                </Popup>
+                            </Grid>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="Role" Value="TopLevelHeader">
+                                    <Setter TargetName="SubMenuArrow" Property="Visibility" Value="Collapsed"/>
+                                </Trigger>
+                                <Trigger Property="Role" Value="TopLevelItem">
+                                    <Setter TargetName="SubMenuArrow" Property="Visibility" Value="Collapsed"/>
+                                </Trigger>
+                                <Trigger Property="Role" Value="SubmenuHeader">
+                                    <Setter TargetName="SubMenuArrow" Property="Visibility" Value="Visible"/>
+                                </Trigger>
+                                <Trigger Property="Role" Value="SubmenuItem">
+                                    <Setter TargetName="SubMenuArrow" Property="Visibility" Value="Collapsed"/>
+                                </Trigger>
+                                <Trigger Property="HasItems" Value="True">
+                                    <Setter TargetName="SubMenuArrow" Property="Visibility" Value="Visible"/>
+                                </Trigger>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="Border" Property="Background" Value="#30FFFFFF"/>
+                                </Trigger>
+                                <Trigger Property="IsPressed" Value="True">
+                                    <Setter TargetName="Border" Property="Background" Value="#50FFFFFF"/>
+                                </Trigger>
+                                <Trigger Property="IsEnabled" Value="False">
+                                    <Setter Property="Foreground" Value="#60FFFFFF"/>
+                                </Trigger>
+                                <Trigger Property="IsHighlighted" Value="True">
+                                    <Setter TargetName="Border" Property="Background" Value="#30FFFFFF"/>
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
+            <!-- Separator Style for Context Menu -->
+            <Style TargetType="Separator">
+                <Setter Property="Height" Value="1"/>
+                <Setter Property="Margin" Value="8,4"/>
+                <Setter Property="Background" Value="#40FFFFFF"/>
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="Separator">
+                            <Border Height="{TemplateBinding Height}"
+                                    Background="{TemplateBinding Background}"
+                                    Margin="{TemplateBinding Margin}"/>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
         </ResourceDictionary>
     </Application.Resources>
 </Application>
