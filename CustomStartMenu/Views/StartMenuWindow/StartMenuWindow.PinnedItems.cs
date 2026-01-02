@@ -71,7 +71,7 @@ public partial class StartMenuWindow
         // Reserve space for pagination buttons (50px)
         var availableHeight = PinnedScrollViewer.ActualHeight > 50 ? PinnedScrollViewer.ActualHeight - 50 : 400;
         var columns = Math.Max(1, (int)(availableWidth / cellSize));
-        var rowsPerPage = Math.Max(1, (int)(availableHeight / cellSize));
+        var rowsPerPage = Math.Max(1, (int)(availableHeight / cellSize) + 1); // +1 for extra row
         var itemsPerPage = columns * rowsPerPage;
         
         // In Ordered mode, compact items first (without firing event to prevent infinite loop)
