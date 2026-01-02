@@ -299,8 +299,8 @@
     <!-- Main Container with animation -->
     <Border x:Name="MainBorder"
             Background="{StaticResource MenuBackgroundBrush}"
-            BorderBrush="{StaticResource MenuBorderBrush}"
-            BorderThickness="1"
+            BorderBrush="Transparent"
+            BorderThickness="0"
             CornerRadius="8"
             Margin="8">
         <Border.Effect>

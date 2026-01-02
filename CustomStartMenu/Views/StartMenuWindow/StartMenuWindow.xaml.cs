@@ -440,6 +440,12 @@ public partial class StartMenuWindow : Window
             return;
         }
         
+        // Don't switch to search mode if inline tab edit is active (new tab name / rename tab)
+        if (_activeTabEditTextBox != null)
+        {
+            return;
+        }
+        
         // Don't switch to search mode if settings view is visible
         if (SettingsView.Visibility == Visibility.Visible)
         {
@@ -486,6 +492,9 @@ public partial class StartMenuWindow : Window
             
             // Don't switch to search mode if inline rename is active
             if (_activeRenameTextBox != null) return;
+            
+            // Don't switch to search mode if inline tab edit is active (new tab name / rename tab)
+            if (_activeTabEditTextBox != null) return;
             
             // Don't switch to search mode if settings view is visible
             if (SettingsView.Visibility == Visibility.Visible) return;

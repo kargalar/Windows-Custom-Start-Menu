@@ -126,20 +126,31 @@ public partial class StartMenuWindow
         contextMenu.IsOpen = true;
     }
 
-    private void StartInlineTabEdit(Tab tab, Button tabButton)
+    private void StartInlineTabEdit(Tab tab, Button? tabButton = null)
     {
         // Cancel any pinned-item inline rename first
         CancelInlineRename();
         
-        // Cancel any existing tab edit
-        CancelInlineTabEdit();
+        // Cancel any existing tab edit without refreshing (we'll set up the new edit)
+        if (_activeTabEditTextBox != null)
+        {
+            _activeTabEditTextBox.KeyDown -= TabEditTextBox_KeyDown;
+            _activeTabEditTextBox.LostFocus -= TabEditTextBox_LostFocus;
+            _activeTabEditTextBox = null;
+            _activeTabEditButton = null;
+            _activeTabEditTabId = null;
+        }
         
         if (TabBarPanel.Visibility != Visibility.Visible)
         {
             return;
         }
         
-        if (tabButton.Content is not TextBlock)
+        // Find the button for this tab if not provided or if it's stale
+        tabButton = TabsPanel.Children.OfType<Button>()
+            .FirstOrDefault(b => b.Tag?.ToString() == tab.Id || (b.Tag?.ToString() == "Active" && tab.Id == _currentTabId));
+        
+        if (tabButton == null || tabButton.Content is not TextBlock)
         {
             return;
         }
@@ -163,8 +174,14 @@ public partial class StartMenuWindow
         _activeTabEditTabId = tab.Id;
         
         tabButton.Content = textBox;
-        textBox.SelectAll();
-        textBox.Focus();
+        
+        // Use Dispatcher to ensure focus after the TextBox is fully rendered
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            textBox.SelectAll();
+            textBox.Focus();
+            Keyboard.Focus(textBox);
+        }), System.Windows.Threading.DispatcherPriority.Input);
         
         textBox.KeyDown += TabEditTextBox_KeyDown;
         textBox.LostFocus += TabEditTextBox_LostFocus;
