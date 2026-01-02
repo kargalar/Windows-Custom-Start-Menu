@@ -383,4 +383,62 @@ public partial class StartMenuWindow
             ApplyTransparency(); // Apply immediately
         }
     }
+
+    private void ClearAllPinsButton_Click(object sender, RoutedEventArgs e)
+    {
+        var result = MessageBox.Show(
+            "Tüm sekmeler, gruplar ve sabitlenmiş öğeler silinecek.\n\nDevam etmek istiyor musunuz?",
+            "Tüm Pinleri Temizle",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning);
+        
+        if (result == MessageBoxResult.Yes)
+        {
+            _pinnedItemsService.ClearAllPins();
+            _currentTabId = _pinnedItemsService.DefaultTab.Id;
+            RefreshTabs();
+            RefreshPinnedItems();
+            
+            MessageBox.Show(
+                "Tüm sabitlenmiş öğeler temizlendi.",
+                "Temizlendi",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+        }
+    }
+
+    private void ClearAllDataButton_Click(object sender, RoutedEventArgs e)
+    {
+        var result = MessageBox.Show(
+            "Tüm veriler (ayarlar ve sabitlenmiş öğeler) silinecek ve uygulama sıfırlanacak.\n\nDevam etmek istiyor musunuz?",
+            "Tüm Verileri Sil",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning);
+        
+        if (result == MessageBoxResult.Yes)
+        {
+            // Clear all pins first
+            _pinnedItemsService.ClearAllPins();
+            
+            // Reset settings to defaults
+            _settingsService.ResetToDefaults();
+            
+            // Update current tab
+            _currentTabId = _pinnedItemsService.DefaultTab.Id;
+            
+            // Refresh UI
+            RefreshTabs();
+            RefreshPinnedItems();
+            LoadSettingsIntoControls();
+            ApplyTransparency();
+            PositionWindow();
+            App.Instance.ApplyThemeColor(_settingsService.Settings.AccentColor);
+            
+            MessageBox.Show(
+                "Tüm veriler temizlendi ve uygulama sıfırlandı.",
+                "Sıfırlandı",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+        }
+    }
 }

@@ -843,6 +843,70 @@
                                            Margin="0,8,0,0"/>
                             </StackPanel>
                         </Border>
+
+                        <!-- Separator -->
+                        <Border Height="1" Background="#30FFFFFF" Margin="0,8,0,20"/>
+                        <TextBlock Text="Veri Yönetimi"
+                                   FontSize="16"
+                                   FontWeight="SemiBold"
+                                   Foreground="{StaticResource TextBrush}"
+                                   Margin="0,0,0,16"/>
+
+                        <!-- Clear All Pins -->
+                        <Border Background="#15FFFFFF" CornerRadius="8" Padding="16" Margin="0,0,0,12">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                
+                                <StackPanel Grid.Column="0">
+                                    <TextBlock Text="Tüm sabitlenmiş öğeleri temizle"
+                                               FontSize="14"
+                                               Foreground="{StaticResource TextBrush}"/>
+                                    <TextBlock Text="Tüm sekmeler, gruplar ve sabitlenmiş uygulamalar silinir"
+                                               FontSize="12"
+                                               Foreground="{StaticResource TextSecondaryBrush}"
+                                               Margin="0,4,0,0"/>
+                                </StackPanel>
+                                
+                                <Button x:Name="ClearAllPinsButton"
+                                        Grid.Column="1"
+                                        Content="Temizle"
+                                        Style="{StaticResource MenuButtonStyle}"
+                                        Background="#EF4444"
+                                        Padding="16,8"
+                                        Click="ClearAllPinsButton_Click"/>
+                            </Grid>
+                        </Border>
+
+                        <!-- Clear All Data -->
+                        <Border Background="#15FFFFFF" CornerRadius="8" Padding="16" Margin="0,0,0,12">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                
+                                <StackPanel Grid.Column="0">
+                                    <TextBlock Text="Tüm verileri temizle"
+                                               FontSize="14"
+                                               Foreground="{StaticResource TextBrush}"/>
+                                    <TextBlock Text="Ayarlar dahil tüm veriler silinir ve uygulama sıfırlanır"
+                                               FontSize="12"
+                                               Foreground="{StaticResource TextSecondaryBrush}"
+                                               Margin="0,4,0,0"/>
+                                </StackPanel>
+                                
+                                <Button x:Name="ClearAllDataButton"
+                                        Grid.Column="1"
+                                        Content="Tümünü Sil"
+                                        Style="{StaticResource MenuButtonStyle}"
+                                        Background="#DC2626"
+                                        Padding="16,8"
+                                        Click="ClearAllDataButton_Click"/>
+                            </Grid>
+                        </Border>
                     </StackPanel>
                 </ScrollViewer>
             </Grid>

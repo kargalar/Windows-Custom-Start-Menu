@@ -201,6 +201,20 @@ public class SettingsService : IDisposable
         _settings.BackgroundDarkness = Math.Clamp(_settings.BackgroundDarkness, 0, 80);
     }
 
+    /// <summary>
+    /// Reset all settings to default values
+    /// </summary>
+    public void ResetToDefaults()
+    {
+        lock (_lockObject)
+        {
+            _settings = new AppSettings();
+            ValidateSettings();
+            Save();
+            SettingsChanged?.Invoke(this, EventArgs.Empty);
+        }
+    }
+
     public void Dispose()
     {
         _fileWatcher?.Dispose();

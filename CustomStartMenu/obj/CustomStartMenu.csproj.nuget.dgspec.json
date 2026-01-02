@@ -1,17 +1,17 @@
 {
   "format": 1,
   "restore": {
-    "c:\\KARGALAR\\Projeler\\Windows\\windows\\CustomStartMenu\\CustomStartMenu.csproj": {}
+    "C:\\KARGALAR\\Projeler\\Windows\\windows\\CustomStartMenu\\CustomStartMenu.csproj": {}
   },
   "projects": {
-    "c:\\KARGALAR\\Projeler\\Windows\\windows\\CustomStartMenu\\CustomStartMenu.csproj": {
+    "C:\\KARGALAR\\Projeler\\Windows\\windows\\CustomStartMenu\\CustomStartMenu.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "c:\\KARGALAR\\Projeler\\Windows\\windows\\CustomStartMenu\\CustomStartMenu.csproj",
+        "projectUniqueName": "C:\\KARGALAR\\Projeler\\Windows\\windows\\CustomStartMenu\\CustomStartMenu.csproj",
         "projectName": "CustomStartMenu",
-        "projectPath": "c:\\KARGALAR\\Projeler\\Windows\\windows\\CustomStartMenu\\CustomStartMenu.csproj",
+        "projectPath": "C:\\KARGALAR\\Projeler\\Windows\\windows\\CustomStartMenu\\CustomStartMenu.csproj",
         "packagesPath": "C:\\Users\\Kargalar\\.nuget\\packages\\",
-        "outputPath": "c:\\KARGALAR\\Projeler\\Windows\\windows\\CustomStartMenu\\obj\\",
+        "outputPath": "C:\\KARGALAR\\Projeler\\Windows\\windows\\CustomStartMenu\\obj\\",
         "projectStyle": "PackageReference",
         "fallbackFolders": [
           "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"

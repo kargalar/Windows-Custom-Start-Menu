@@ -201,6 +201,24 @@ public class PinnedItemsService : IDisposable
         return tab;
     }
 
+    /// <summary>
+    /// Clear all pinned items, groups, and tabs (reset to default state)
+    /// </summary>
+    public void ClearAllPins()
+    {
+        lock (_lockObject)
+        {
+            _pinnedItems.Clear();
+            _groups.Clear();
+            _tabs.Clear();
+            
+            // Create default tab
+            _tabs.Add(new Tab { Name = "Ana Sayfa", Order = 0 });
+            Save();
+        }
+        PinnedItemsChanged?.Invoke(this, EventArgs.Empty);
+    }
+
     public void RenameTab(string tabId, string newName)
     {
         var tab = _tabs.FirstOrDefault(t => t.Id == tabId);
