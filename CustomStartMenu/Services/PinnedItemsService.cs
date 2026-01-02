@@ -85,15 +85,21 @@ public class PinnedItemsService : IDisposable
     {
         if (_isInternalSave) return;
 
-        Task.Delay(100).ContinueWith(_ =>
+        // Use Task.Run to avoid blocking and potential deadlocks
+        Task.Run(async () =>
         {
+            await Task.Delay(100);
+            
+            if (_isInternalSave) return;
+            
             lock (_lockObject)
             {
                 if (_isInternalSave) return;
-                
                 Load();
-                PinnedItemsChanged?.Invoke(this, EventArgs.Empty);
             }
+            
+            // Invoke event outside the lock to prevent deadlocks
+            PinnedItemsChanged?.Invoke(this, EventArgs.Empty);
         });
     }
 

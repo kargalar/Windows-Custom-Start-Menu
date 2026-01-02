@@ -35,19 +35,10 @@ public partial class App : Application
 
     protected override void OnStartup(StartupEventArgs e)
     {
-        // Check for single instance
-        _mutex = new Mutex(true, MutexName, out bool isNewInstance);
-        
-        if (!isNewInstance)
-        {
-            // Another instance is already running, exit silently
-            Shutdown();
-            return;
-        }
-        
         base.OnStartup(e);
 
-        // Check for --pin or --unpin argument (from context menu)
+        // Check for context menu arguments FIRST (before mutex check)
+        // These commands should work even if another instance is running
         var args = e.Args;
         if (args.Length >= 2)
         {
@@ -63,6 +54,12 @@ public partial class App : Application
                 HandleUnpinFromContextMenu(pathToUnpin);
                 return;
             }
+            else if (args[0] == "--toggle")
+            {
+                var pathToToggle = args[1];
+                HandleToggleFromContextMenu(pathToToggle);
+                return;
+            }
             else if (args[0] == "--check-pinned")
             {
                 // Used by context menu to check if item is pinned
@@ -70,6 +67,16 @@ public partial class App : Application
                 CheckPinnedStatus(pathToCheck);
                 return;
             }
+        }
+
+        // Check for single instance (only for normal startup, not context menu commands)
+        _mutex = new Mutex(true, MutexName, out bool isNewInstance);
+        
+        if (!isNewInstance)
+        {
+            // Another instance is already running, exit silently
+            Shutdown();
+            return;
         }
 
         // Initialize services
@@ -214,6 +221,37 @@ public partial class App : Application
         catch (Exception ex)
         {
             System.Diagnostics.Debug.WriteLine($"Failed to unpin: {ex.Message}");
+        }
+        finally
+        {
+            Shutdown();
+        }
+    }
+
+    private void HandleToggleFromContextMenu(string path)
+    {
+        try
+        {
+            var pinnedService = new PinnedItemsService();
+            
+            if (pinnedService.IsPinned(path))
+            {
+                // Already pinned - remove it
+                pinnedService.RemovePin(path);
+                System.Diagnostics.Debug.WriteLine($"Toggled OFF (unpinned): {path}");
+            }
+            else
+            {
+                // Not pinned - add it
+                pinnedService.AddPin(path, null, null, 6);
+                System.Diagnostics.Debug.WriteLine($"Toggled ON (pinned): {path}");
+            }
+            
+            pinnedService.Dispose();
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Failed to toggle pin: {ex.Message}");
         }
         finally
         {

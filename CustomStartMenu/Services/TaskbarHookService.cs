@@ -50,6 +50,9 @@ public class TaskbarHookService : IDisposable
     [DllImport("user32.dll")]
     private static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
 
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+
     [StructLayout(LayoutKind.Sequential)]
     private struct RECT
     {
@@ -137,6 +140,31 @@ public class TaskbarHookService : IDisposable
         _isEnabled = false;
     }
 
+    // Start menu window class names for different Windows versions
+    private static readonly string[] StartMenuClassNames = new[]
+    {
+        "Windows.UI.Core.CoreWindow",           // Windows 10/11 main Start menu
+        "Xaml_WindowedPopupClass",              // Windows 11 Start menu popups
+        "Windows.UI.Composition.DesktopWindowContentBridge", // Windows 11 composition
+        "LauncherTipWnd",                       // Windows 11 Start button flyout
+        "Shell_TrayWnd",                        // Windows 10 taskbar
+    };
+
+    // Start menu window titles for different locales
+    private static readonly string[] StartMenuTitles = new[]
+    {
+        "Start",                                // English
+        "Başlat",                               // Turkish
+        "Démarrer",                             // French
+        "Inicio",                               // Spanish
+        "Start-Menü",                           // German
+        "スタート",                              // Japanese
+        "시작",                                  // Korean
+        "开始",                                  // Chinese (Simplified)
+        "開始",                                  // Chinese (Traditional)
+        "Пуск",                                 // Russian
+    };
+
     private void WinEventProc(IntPtr hWinEventHook, uint eventType, IntPtr hwnd,
         int idObject, int idChild, uint dwEventThread, uint dwmsEventTime)
     {
@@ -152,22 +180,47 @@ public class TaskbarHookService : IDisposable
             // Detect Windows 10/11 Start Menu windows
             bool isStartMenu = false;
             
-            // Windows 11 Start menu uses "Windows.UI.Core.CoreWindow" with "Start" title
-            if (classNameStr == "Windows.UI.Core.CoreWindow")
+            // Check if this is a potential Start menu window class
+            bool isPotentialStartMenuClass = StartMenuClassNames.Any(c => 
+                classNameStr.Equals(c, StringComparison.OrdinalIgnoreCase));
+
+            if (isPotentialStartMenuClass)
             {
-                var startMenuHwnd = FindWindow("Windows.UI.Core.CoreWindow", "Start");
-                if (hwnd == startMenuHwnd && IsWindowVisible(hwnd))
+                // For CoreWindow and similar classes, check the window title
+                if (classNameStr == "Windows.UI.Core.CoreWindow" || 
+                    classNameStr == "Xaml_WindowedPopupClass" ||
+                    classNameStr == "Windows.UI.Composition.DesktopWindowContentBridge")
                 {
-                    isStartMenu = true;
+                    foreach (var title in StartMenuTitles)
+                    {
+                        var startMenuHwnd = FindWindow(classNameStr, title);
+                        if (hwnd == startMenuHwnd && IsWindowVisible(hwnd))
+                        {
+                            isStartMenu = true;
+                            Debug.WriteLine($"Start menu detected via title match: {title}");
+                            break;
+                        }
+                    }
+                    
+                    // Also check for Windows 11 22H2+ where title might be empty or different
+                    if (!isStartMenu && IsWindowVisible(hwnd))
+                    {
+                        // Check if this window belongs to StartMenuExperienceHost
+                        var processId = GetWindowProcessId(hwnd);
+                        if (IsStartMenuProcess(processId))
+                        {
+                            isStartMenu = true;
+                            Debug.WriteLine($"Start menu detected via process: StartMenuExperienceHost");
+                        }
+                    }
                 }
-                
-                // Turkish locale
-                if (!isStartMenu)
+                else if (classNameStr == "LauncherTipWnd")
                 {
-                    startMenuHwnd = FindWindow("Windows.UI.Core.CoreWindow", "Başlat");
-                    if (hwnd == startMenuHwnd && IsWindowVisible(hwnd))
+                    // Windows 11 Start button tooltip/flyout
+                    if (IsWindowVisible(hwnd))
                     {
                         isStartMenu = true;
+                        Debug.WriteLine("Start menu detected via LauncherTipWnd");
                     }
                 }
             }
@@ -179,7 +232,7 @@ public class TaskbarHookService : IDisposable
                     return;
 
                 _lastTriggerTime = DateTime.Now;
-                Debug.WriteLine($"Start menu detected - intercepting (class: {classNameStr})");
+                Debug.WriteLine($"Start menu intercepted (class: {classNameStr})");
 
                 // Close Windows Start Menu immediately
                 CloseWindowsStartMenu();
@@ -211,16 +264,30 @@ public class TaskbarHookService : IDisposable
     {
         try
         {
-            // Find and hide the Start Menu window
-            var startMenuHwnd = FindWindow("Windows.UI.Core.CoreWindow", "Start");
-            if (startMenuHwnd == IntPtr.Zero)
-                startMenuHwnd = FindWindow("Windows.UI.Core.CoreWindow", "Başlat");
-
-            if (startMenuHwnd != IntPtr.Zero && IsWindowVisible(startMenuHwnd))
+            // Try to hide all possible Start menu windows
+            foreach (var className in StartMenuClassNames)
             {
-                // Try to hide the window directly
-                ShowWindow(startMenuHwnd, SW_HIDE);
-                Debug.WriteLine("Windows Start Menu hidden");
+                foreach (var title in StartMenuTitles)
+                {
+                    var startMenuHwnd = FindWindow(className, title);
+                    if (startMenuHwnd != IntPtr.Zero && IsWindowVisible(startMenuHwnd))
+                    {
+                        ShowWindow(startMenuHwnd, SW_HIDE);
+                        Debug.WriteLine($"Hidden Start Menu window: {className} - {title}");
+                    }
+                }
+                
+                // Also try with null title
+                var hwnd = FindWindow(className, null);
+                if (hwnd != IntPtr.Zero && IsWindowVisible(hwnd))
+                {
+                    var processId = GetWindowProcessId(hwnd);
+                    if (IsStartMenuProcess(processId))
+                    {
+                        ShowWindow(hwnd, SW_HIDE);
+                        Debug.WriteLine($"Hidden Start Menu window via process: {className}");
+                    }
+                }
             }
 
             // Also send Escape key to close any remaining UI
@@ -230,6 +297,34 @@ public class TaskbarHookService : IDisposable
         catch (Exception ex)
         {
             Debug.WriteLine($"Error closing Windows Start Menu: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Get the process ID of a window
+    /// </summary>
+    private uint GetWindowProcessId(IntPtr hwnd)
+    {
+        GetWindowThreadProcessId(hwnd, out uint processId);
+        return processId;
+    }
+
+    /// <summary>
+    /// Check if a process ID belongs to StartMenuExperienceHost or ShellExperienceHost
+    /// </summary>
+    private bool IsStartMenuProcess(uint processId)
+    {
+        try
+        {
+            var process = Process.GetProcessById((int)processId);
+            var processName = process.ProcessName.ToLowerInvariant();
+            return processName == "startmenuexperiencehost" || 
+                   processName == "shellexperiencehost" ||
+                   processName == "searchhost";
+        }
+        catch
+        {
+            return false;
         }
     }
 
