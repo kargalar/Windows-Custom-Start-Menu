@@ -41,6 +41,7 @@ public partial class StartMenuWindow
         button.Click += (s, e) =>
         {
             _currentTabId = tab.Id;
+            ResetPageOnTabChange();
             RefreshTabs();
             RefreshPinnedItems();
         };

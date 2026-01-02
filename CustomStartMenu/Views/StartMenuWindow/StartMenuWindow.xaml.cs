@@ -71,6 +71,10 @@ public partial class StartMenuWindow : Window
     private Button? _activeTabEditButton;
     private string? _activeTabEditTabId;
 
+    // Pagination
+    private int _currentPage = 0;
+    private int _totalPages = 1;
+
     #endregion
 
     #region Constructor
@@ -545,8 +549,8 @@ public partial class StartMenuWindow : Window
             
             if (scrollViewerRect.Contains(mousePos))
             {
-                // Only handle if content is scrollable
-                return PinnedScrollViewer.ScrollableHeight > 0;
+                // With pagination, no scrolling needed
+                return false;
             }
         }
         

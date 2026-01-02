@@ -18,3 +18,5 @@ file explorer de exe ye sağ tıklayıp pinle diyorıum ama pinlenmiyor. ayrıca
 ara kısmındaki souçları genişlet. mesela tam eşlelmesi gerekmesin. everyhing diye bir program var. bilgisayarındaki öğeleri çok iyi bir şekilde aratabiliyorsun. onun gibi istiyorum.
 
 menü borderi kaldır.
+
+yeni sekmeleri isimlendirirken otomatik olarak arama sayfasına gitmesin

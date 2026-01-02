@@ -8,7 +8,7 @@ using CustomStartMenu.Models;
 namespace CustomStartMenu.Views;
 
 /// <summary>
-/// Grid-based pinned items display for the Start Menu
+/// Grid-based pinned items display for the Start Menu with pagination
 /// </summary>
 public partial class StartMenuWindow
 {
@@ -49,6 +49,7 @@ public partial class StartMenuWindow
         if (totalItems == 0)
         {
             EmptyState.Visibility = Visibility.Visible;
+            HidePaginationControls();
             return;
         }
 
@@ -58,7 +59,7 @@ public partial class StartMenuWindow
     }
 
     /// <summary>
-    /// Render items and groups in a grid layout
+    /// Render items and groups in a grid layout with pagination
     /// </summary>
     private void RenderGridLayout(List<PinnedItem> items, List<Group> groups, string currentTabId)
     {
@@ -67,24 +68,67 @@ public partial class StartMenuWindow
         var layoutMode = _settingsService.Settings.PinnedItemsLayout;
         
         var availableWidth = PinnedScrollViewer.ActualWidth > 0 ? PinnedScrollViewer.ActualWidth - 16 : 600;
-        var availableHeight = PinnedScrollViewer.ActualHeight > 0 ? PinnedScrollViewer.ActualHeight : 500;
+        // Reserve space for pagination buttons (50px)
+        var availableHeight = PinnedScrollViewer.ActualHeight > 50 ? PinnedScrollViewer.ActualHeight - 50 : 400;
         var columns = Math.Max(1, (int)(availableWidth / cellSize));
+        var rowsPerPage = Math.Max(1, (int)(availableHeight / cellSize));
+        var itemsPerPage = columns * rowsPerPage;
         
-        // Calculate rows needed based on items
-        int maxItemRow = 0;
-        foreach (var item in items)
+        // In Ordered mode, compact items first (without firing event to prevent infinite loop)
+        if (layoutMode == LayoutMode.Ordered)
         {
-            maxItemRow = Math.Max(maxItemRow, item.GridRow);
+            _pinnedItemsService.CompactItems(currentTabId, null, columns, fireEvent: false);
+            // Refresh lists after compacting
+            items = _pinnedItemsService.GetUngroupedItemsForTab(currentTabId).ToList();
+            groups = _pinnedItemsService.GetGroupsForTab(currentTabId).ToList();
         }
-        foreach (var group in groups)
-        {
-            maxItemRow = Math.Max(maxItemRow, group.GridRow);
-        }
+
+        // Combine all elements for pagination
+        var allElements = new List<object>();
         
-        // In FreeForm mode, ensure grid covers at least the visible area of ScrollViewer
-        // This allows dropping items anywhere in the visible area
-        int minRowsForVisibleArea = Math.Max(1, (int)(availableHeight / cellSize) + 1);
-        var rows = Math.Max(maxItemRow + 2, minRowsForVisibleArea);
+        if (layoutMode == LayoutMode.Ordered)
+        {
+            // In ordered mode, combine and sort by position
+            var combined = items.Cast<object>().Concat(groups.Cast<object>())
+                .OrderBy(e => e is PinnedItem pi ? pi.GridRow : ((Group)e).GridRow)
+                .ThenBy(e => e is PinnedItem pi ? pi.GridColumn : ((Group)e).GridColumn)
+                .ToList();
+            allElements = combined;
+        }
+        else
+        {
+            // In FreeForm mode, use grid positions
+            allElements = items.Cast<object>().Concat(groups.Cast<object>()).ToList();
+        }
+
+        // Calculate pagination
+        var totalElements = allElements.Count;
+        _totalPages = Math.Max(1, (int)Math.Ceiling((double)totalElements / itemsPerPage));
+        
+        // Clamp current page
+        if (_currentPage >= _totalPages) _currentPage = _totalPages - 1;
+        if (_currentPage < 0) _currentPage = 0;
+        
+        // Update pagination controls
+        UpdatePaginationControls();
+        
+        // Get elements for current page
+        List<object> pageElements;
+        if (layoutMode == LayoutMode.Ordered)
+        {
+            pageElements = allElements.Skip(_currentPage * itemsPerPage).Take(itemsPerPage).ToList();
+        }
+        else
+        {
+            // FreeForm mode: filter by row range
+            int startRow = _currentPage * rowsPerPage;
+            int endRow = startRow + rowsPerPage;
+            pageElements = allElements.Where(e =>
+            {
+                int row = e is PinnedItem pi ? pi.GridRow : ((Group)e).GridRow;
+                return row >= startRow && row < endRow;
+            }).ToList();
+        }
         
         // Create grid
         var grid = new Grid
@@ -106,41 +150,58 @@ public partial class StartMenuWindow
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(cellSize) });
         }
 
-        // Define rows
-        for (int r = 0; r < rows; r++)
+        // Define rows for this page
+        for (int r = 0; r < rowsPerPage; r++)
         {
             grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(cellSize) });
         }
 
-        // In Ordered mode, compact items first (without firing event to prevent infinite loop)
-        if (layoutMode == LayoutMode.Ordered)
+        // Place elements
+        int index = 0;
+        int startRowOffset = _currentPage * rowsPerPage;
+        
+        foreach (var element in pageElements)
         {
-            _pinnedItemsService.CompactItems(currentTabId, null, columns, fireEvent: false);
-            // Refresh lists after compacting
-            items = _pinnedItemsService.GetUngroupedItemsForTab(currentTabId).ToList();
-            groups = _pinnedItemsService.GetGroupsForTab(currentTabId).ToList();
-        }
-
-        // Place items
-        foreach (var item in items)
-        {
-            if (item.GridRow < rows && item.GridColumn < columns)
+            int row, col;
+            
+            if (layoutMode == LayoutMode.Ordered)
             {
-                var button = CreatePinnedItemButton(item, itemSize);
-                Grid.SetRow(button, item.GridRow);
-                Grid.SetColumn(button, item.GridColumn);
-                grid.Children.Add(button);
+                // Sequential placement
+                row = index / columns;
+                col = index % columns;
+                index++;
             }
-        }
-
-        // Place groups
-        foreach (var group in groups)
-        {
-            if (group.GridRow < rows && group.GridColumn < columns)
+            else
             {
-                var button = CreateGroupFolderButton(group, currentTabId, itemSize);
-                Grid.SetRow(button, group.GridRow);
-                Grid.SetColumn(button, group.GridColumn);
+                // Use stored positions, adjusted for page offset
+                if (element is PinnedItem pi)
+                {
+                    row = pi.GridRow - startRowOffset;
+                    col = pi.GridColumn;
+                }
+                else
+                {
+                    var g = (Group)element;
+                    row = g.GridRow - startRowOffset;
+                    col = g.GridColumn;
+                }
+            }
+            
+            if (row >= 0 && row < rowsPerPage && col >= 0 && col < columns)
+            {
+                Button button;
+                if (element is PinnedItem item)
+                {
+                    button = CreatePinnedItemButton(item, itemSize);
+                }
+                else
+                {
+                    var group = (Group)element;
+                    button = CreateGroupFolderButton(group, currentTabId, itemSize);
+                }
+                
+                Grid.SetRow(button, row);
+                Grid.SetColumn(button, col);
                 grid.Children.Add(button);
             }
         }
@@ -148,9 +209,54 @@ public partial class StartMenuWindow
         PinnedItemsContainer.Children.Add(grid);
     }
 
+    private void UpdatePaginationControls()
+    {
+        if (_totalPages > 1)
+        {
+            PaginationPanel.Visibility = Visibility.Visible;
+            PrevPageButton.Visibility = _currentPage > 0 ? Visibility.Visible : Visibility.Hidden;
+            NextPageButton.Visibility = _currentPage < _totalPages - 1 ? Visibility.Visible : Visibility.Hidden;
+        }
+        else
+        {
+            HidePaginationControls();
+        }
+    }
+
+    private void HidePaginationControls()
+    {
+        PaginationPanel.Visibility = Visibility.Collapsed;
+        PrevPageButton.Visibility = Visibility.Collapsed;
+        NextPageButton.Visibility = Visibility.Collapsed;
+    }
+
+    private void PrevPageButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_currentPage > 0)
+        {
+            _currentPage--;
+            RefreshPinnedItems();
+        }
+    }
+
+    private void NextPageButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_currentPage < _totalPages - 1)
+        {
+            _currentPage++;
+            RefreshPinnedItems();
+        }
+    }
+
+    private void ResetPageOnTabChange()
+    {
+        _currentPage = 0;
+    }
+
     private void ShowGroupContent(Group group, string tabId)
     {
         EmptyState.Visibility = Visibility.Collapsed;
+        HidePaginationControls(); // Hide pagination in group view
 
         var contentPanel = new StackPanel();
 

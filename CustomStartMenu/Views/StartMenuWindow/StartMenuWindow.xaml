@@ -391,12 +391,40 @@
                                MaxWidth="350"/>
                 </StackPanel>
 
-                <!-- Pinned Items with Groups -->
-                <ScrollViewer x:Name="PinnedScrollViewer" 
-                              VerticalScrollBarVisibility="Auto" 
-                              HorizontalScrollBarVisibility="Disabled">
-                    <StackPanel x:Name="PinnedItemsContainer"/>
-                </ScrollViewer>
+                <!-- Pinned Items with Groups and Pagination -->
+                <Grid x:Name="PinnedScrollViewer">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+                    
+                    <!-- Items Container -->
+                    <StackPanel x:Name="PinnedItemsContainer" Grid.Row="0"/>
+                    
+                    <!-- Pagination Controls -->
+                    <Grid x:Name="PaginationPanel" Grid.Row="1" Visibility="Collapsed" Margin="0,8,0,0">
+                        <Button x:Name="PrevPageButton" 
+                                Content="←" 
+                                HorizontalAlignment="Left"
+                                VerticalAlignment="Bottom"
+                                Width="40" Height="40"
+                                FontSize="20"
+                                FontWeight="Bold"
+                                Click="PrevPageButton_Click"
+                                Style="{StaticResource MenuButtonStyle}"
+                                Visibility="Collapsed"/>
+                        <Button x:Name="NextPageButton" 
+                                Content="→" 
+                                HorizontalAlignment="Right"
+                                VerticalAlignment="Bottom"
+                                Width="40" Height="40"
+                                FontSize="20"
+                                FontWeight="Bold"
+                                Click="NextPageButton_Click"
+                                Style="{StaticResource MenuButtonStyle}"
+                                Visibility="Collapsed"/>
+                    </Grid>
+                </Grid>
             </Grid>
 
             <!-- Content Area - Search View (Hidden by default) -->
