@@ -13,12 +13,6 @@ public class PinnedItem
     public string? IconPath { get; set; }
     public PinnedItemType Type { get; set; }
     public DateTime PinnedAt { get; set; } = DateTime.Now;
-    public int Order { get; set; }
-    
-    /// <summary>
-    /// Global order for mixed sorting with groups (used for ungrouped items in ordered layout)
-    /// </summary>
-    public int GlobalOrder { get; set; }
     
     /// <summary>
     /// The tab this item belongs to (null = default/first tab)
@@ -36,14 +30,14 @@ public class PinnedItem
     public string? CustomName { get; set; }
     
     /// <summary>
-    /// Grid row position for free-form layout mode (null = auto-positioned)
+    /// Grid row position (0-based)
     /// </summary>
-    public int? GridRow { get; set; }
+    public int GridRow { get; set; }
     
     /// <summary>
-    /// Grid column position for free-form layout mode (null = auto-positioned)
+    /// Grid column position (0-based)
     /// </summary>
-    public int? GridColumn { get; set; }
+    public int GridColumn { get; set; }
     
     /// <summary>
     /// Display name to show in UI - uses CustomName if set, otherwise falls back to Name

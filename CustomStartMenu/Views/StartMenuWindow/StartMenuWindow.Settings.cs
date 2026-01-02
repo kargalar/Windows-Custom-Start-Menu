@@ -127,12 +127,19 @@ public partial class StartMenuWindow
             var mode = modeStr == "Ordered" ? LayoutMode.Ordered : LayoutMode.FreeForm;
             var previousMode = _settingsService.Settings.PinnedItemsLayout;
             
-            // When switching from FreeForm to Ordered, clear grid positions
+            // When switching from FreeForm to Ordered, compact all items
             if (previousMode == LayoutMode.FreeForm && mode == LayoutMode.Ordered)
             {
+                var gridColumns = CalculateGridColumns();
                 foreach (var tab in _pinnedItemsService.Tabs)
                 {
-                    _pinnedItemsService.ClearGridPositionsForTab(tab.Id);
+                    // Compact items for main tab view (groupId = null)
+                    _pinnedItemsService.CompactItems(tab.Id, null, gridColumns);
+                    // Compact items within each group
+                    foreach (var group in _pinnedItemsService.GetGroupsForTab(tab.Id))
+                    {
+                        _pinnedItemsService.CompactItems(tab.Id, group.Id, gridColumns);
+                    }
                 }
             }
             

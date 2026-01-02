@@ -174,7 +174,8 @@ public partial class App : Application
                 return;
             }
             
-            pinnedService.AddPin(path);
+            // Use default 6 columns for external pin operations
+            pinnedService.AddPin(path, null, null, 6);
             pinnedService.Dispose();
 
             // Show notification or just exit

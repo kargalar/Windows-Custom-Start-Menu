@@ -15,7 +15,7 @@ public class PinnedItemsConfig
 }
 
 /// <summary>
-/// Manages pinned items, tabs, and groups - save, load, add, remove
+/// Manages pinned items, tabs, and groups with grid-based positioning
 /// </summary>
 public class PinnedItemsService : IDisposable
 {
@@ -83,10 +83,8 @@ public class PinnedItemsService : IDisposable
 
     private void OnConfigFileChanged(object sender, FileSystemEventArgs e)
     {
-        // Ignore changes caused by our own save
         if (_isInternalSave) return;
 
-        // Debounce and reload
         Task.Delay(100).ContinueWith(_ =>
         {
             lock (_lockObject)
@@ -118,7 +116,7 @@ public class PinnedItemsService : IDisposable
                     }
                 }
                 
-                // Migrate from old format (pinned-items.json)
+                // Migrate from old format
                 var oldConfigPath = Path.Combine(Path.GetDirectoryName(_configPath)!, "pinned-items.json");
                 if (_pinnedItems.Count == 0 && File.Exists(oldConfigPath))
                 {
@@ -128,13 +126,14 @@ public class PinnedItemsService : IDisposable
                         _pinnedItems = JsonSerializer.Deserialize<List<PinnedItem>>(oldJson) ?? new();
                         if (_pinnedItems.Count > 0)
                         {
-                            Save(); // Save to new format
+                            // Assign grid positions to migrated items
+                            AssignGridPositionsToItems(_pinnedItems, null, 10);
+                            Save();
                         }
                     }
                     catch { }
                 }
 
-                // Ensure at least one tab exists
                 if (_tabs.Count == 0)
                 {
                     _tabs.Add(new Tab { Name = "Ana Sayfa", Order = 0 });
@@ -171,7 +170,6 @@ public class PinnedItemsService : IDisposable
                 });
                 File.WriteAllText(_configPath, json);
 
-                // Small delay to ensure file watcher doesn't pick up our own change
                 Task.Delay(200).ContinueWith(_ => _isInternalSave = false);
             }
             catch (Exception ex)
@@ -211,18 +209,15 @@ public class PinnedItemsService : IDisposable
     public void RemoveTab(string tabId)
     {
         var tab = _tabs.FirstOrDefault(t => t.Id == tabId);
-        if (tab == null || _tabs.Count <= 1) return; // Keep at least one tab
+        if (tab == null || _tabs.Count <= 1) return;
 
-        // Move items from this tab to default tab
         var defaultTab = _tabs.Where(t => t.Id != tabId).OrderBy(t => t.Order).First();
         foreach (var item in _pinnedItems.Where(p => p.TabId == tabId))
         {
             item.TabId = defaultTab.Id;
         }
 
-        // Remove groups in this tab
         _groups.RemoveAll(g => g.TabId == tabId);
-
         _tabs.Remove(tab);
         ReorderTabs();
         Save();
@@ -261,119 +256,23 @@ public class PinnedItemsService : IDisposable
 
     #region Group Management
 
-    public Group AddGroup(string name, string? tabId = null)
+    public Group AddGroup(string name, string? tabId, int gridColumns)
     {
         tabId ??= DefaultTab.Id;
         
-        // Get the max global order from both ungrouped items and groups in this tab
-        var maxGlobalOrder = GetMaxGlobalOrder(tabId);
+        var (row, col) = GetNextAvailableCell(tabId, null, gridColumns);
         
-        var groupsInTab = _groups.Where(g => g.TabId == tabId).ToList();
         var group = new Group
         {
             Name = name,
             TabId = tabId,
-            Order = groupsInTab.Count,
-            GlobalOrder = maxGlobalOrder + 1
+            GridRow = row,
+            GridColumn = col
         };
         _groups.Add(group);
         Save();
         PinnedItemsChanged?.Invoke(this, EventArgs.Empty);
         return group;
-    }
-    
-    /// <summary>
-    /// Get the maximum GlobalOrder value among ungrouped items and groups in a tab
-    /// </summary>
-    private int GetMaxGlobalOrder(string? tabId)
-    {
-        tabId ??= DefaultTab.Id;
-        
-        var maxItemOrder = _pinnedItems
-            .Where(p => p.TabId == tabId && p.GroupId == null)
-            .Select(p => p.GlobalOrder)
-            .DefaultIfEmpty(-1)
-            .Max();
-            
-        var maxGroupOrder = _groups
-            .Where(g => g.TabId == tabId)
-            .Select(g => g.GlobalOrder)
-            .DefaultIfEmpty(-1)
-            .Max();
-            
-        return Math.Max(maxItemOrder, maxGroupOrder);
-    }
-    
-    /// <summary>
-    /// Get all displayable elements (ungrouped items + groups) sorted by GlobalOrder
-    /// </summary>
-    public List<object> GetSortedElementsForTab(string? tabId)
-    {
-        tabId ??= DefaultTab.Id;
-        
-        var elements = new List<(object Element, int GlobalOrder)>();
-        
-        // Add ungrouped items
-        foreach (var item in _pinnedItems.Where(p => p.TabId == tabId && p.GroupId == null))
-        {
-            elements.Add((item, item.GlobalOrder));
-        }
-        
-        // Add groups
-        foreach (var group in _groups.Where(g => g.TabId == tabId))
-        {
-            elements.Add((group, group.GlobalOrder));
-        }
-        
-        return elements.OrderBy(e => e.GlobalOrder).Select(e => e.Element).ToList();
-    }
-    
-    /// <summary>
-    /// Move an element (item or group) to a new global position
-    /// </summary>
-    public void MoveElementToGlobalPosition(string elementId, bool isGroup, int toGlobalIndex, string? tabId = null)
-    {
-        tabId ??= DefaultTab.Id;
-        
-        // Get all elements sorted by current GlobalOrder
-        var elements = GetSortedElementsForTab(tabId);
-        
-        // Find and remove the element being moved
-        object? movingElement = null;
-        if (isGroup)
-        {
-            movingElement = _groups.FirstOrDefault(g => g.Id == elementId);
-        }
-        else
-        {
-            movingElement = _pinnedItems.FirstOrDefault(p => p.Id == elementId);
-        }
-        
-        if (movingElement == null) return;
-        
-        elements.Remove(movingElement);
-        
-        // Clamp the target index
-        toGlobalIndex = Math.Max(0, Math.Min(toGlobalIndex, elements.Count));
-        
-        // Insert at new position
-        elements.Insert(toGlobalIndex, movingElement);
-        
-        // Update GlobalOrder for all elements
-        for (int i = 0; i < elements.Count; i++)
-        {
-            if (elements[i] is PinnedItem item)
-            {
-                item.GlobalOrder = i;
-            }
-            else if (elements[i] is Group group)
-            {
-                group.GlobalOrder = i;
-            }
-        }
-        
-        Save();
-        PinnedItemsChanged?.Invoke(this, EventArgs.Empty);
     }
 
     public void RenameGroup(string groupId, string newName)
@@ -392,14 +291,14 @@ public class PinnedItemsService : IDisposable
         var group = _groups.FirstOrDefault(g => g.Id == groupId);
         if (group == null) return;
 
-        // Ungroup items in this group
-        foreach (var item in _pinnedItems.Where(p => p.GroupId == groupId))
+        // Ungroup items - place them at available positions
+        var itemsInGroup = _pinnedItems.Where(p => p.GroupId == groupId).ToList();
+        foreach (var item in itemsInGroup)
         {
             item.GroupId = null;
         }
 
         _groups.Remove(group);
-        ReorderGroupsInTab(group.TabId);
         Save();
         PinnedItemsChanged?.Invoke(this, EventArgs.Empty);
     }
@@ -415,46 +314,307 @@ public class PinnedItemsService : IDisposable
         }
     }
 
+    #endregion
+
+    #region Grid-Based Item Management
+
     /// <summary>
-    /// Move a group to a new position within its tab
+    /// Get the next available cell in the grid
     /// </summary>
-    /// <param name="groupId">The ID of the group to move</param>
-    /// <param name="toIndex">The target index position</param>
-    public void MoveGroup(string groupId, int toIndex)
+    public (int row, int col) GetNextAvailableCell(string? tabId, string? groupId, int gridColumns)
     {
-        var group = _groups.FirstOrDefault(g => g.Id == groupId);
-        if (group == null) return;
-
-        var groupsInTab = _groups
-            .Where(g => g.TabId == group.TabId)
-            .OrderBy(g => g.Order)
-            .ToList();
-
-        // Remove the group from its current position
-        groupsInTab.Remove(group);
-
-        // Clamp the target index
-        toIndex = Math.Max(0, Math.Min(toIndex, groupsInTab.Count));
-
-        // Insert at the new position
-        groupsInTab.Insert(toIndex, group);
-
-        // Update order values
-        for (int i = 0; i < groupsInTab.Count; i++)
+        tabId ??= DefaultTab.Id;
+        
+        var occupiedCells = GetOccupiedCells(tabId, groupId);
+        
+        int row = 0, col = 0;
+        while (occupiedCells.Contains((row, col)))
         {
-            groupsInTab[i].Order = i;
+            col++;
+            if (col >= gridColumns)
+            {
+                col = 0;
+                row++;
+            }
         }
+        
+        return (row, col);
+    }
 
+    /// <summary>
+    /// Get all occupied cells in a tab (or group)
+    /// </summary>
+    public HashSet<(int row, int col)> GetOccupiedCells(string? tabId, string? groupId)
+    {
+        tabId ??= DefaultTab.Id;
+        var occupied = new HashSet<(int row, int col)>();
+        
+        if (groupId == null)
+        {
+            // Main tab view - check ungrouped items and groups
+            foreach (var item in _pinnedItems.Where(p => p.TabId == tabId && p.GroupId == null))
+            {
+                occupied.Add((item.GridRow, item.GridColumn));
+            }
+            foreach (var group in _groups.Where(g => g.TabId == tabId))
+            {
+                occupied.Add((group.GridRow, group.GridColumn));
+            }
+        }
+        else
+        {
+            // Inside a group - only check items in that group
+            foreach (var item in _pinnedItems.Where(p => p.GroupId == groupId))
+            {
+                occupied.Add((item.GridRow, item.GridColumn));
+            }
+        }
+        
+        return occupied;
+    }
+
+    /// <summary>
+    /// Check if a cell is occupied
+    /// </summary>
+    public bool IsCellOccupied(string? tabId, string? groupId, int row, int col)
+    {
+        return GetOccupiedCells(tabId, groupId).Contains((row, col));
+    }
+
+    /// <summary>
+    /// Get element at a specific cell (returns PinnedItem, Group, or null)
+    /// </summary>
+    public object? GetElementAtCell(string? tabId, string? groupId, int row, int col)
+    {
+        tabId ??= DefaultTab.Id;
+        
+        if (groupId == null)
+        {
+            // Check ungrouped items
+            var item = _pinnedItems.FirstOrDefault(p => 
+                p.TabId == tabId && p.GroupId == null && p.GridRow == row && p.GridColumn == col);
+            if (item != null) return item;
+            
+            // Check groups
+            var group = _groups.FirstOrDefault(g => 
+                g.TabId == tabId && g.GridRow == row && g.GridColumn == col);
+            return group;
+        }
+        else
+        {
+            // Inside a group - only items
+            return _pinnedItems.FirstOrDefault(p => 
+                p.GroupId == groupId && p.GridRow == row && p.GridColumn == col);
+        }
+    }
+
+    /// <summary>
+    /// Move an element to a cell - swaps if occupied
+    /// </summary>
+    public void MoveToCell(string elementId, bool isGroup, int targetRow, int targetCol, string? tabId, string? groupId)
+    {
+        tabId ??= DefaultTab.Id;
+        
+        if (isGroup)
+        {
+            var group = _groups.FirstOrDefault(g => g.Id == elementId);
+            if (group == null) return;
+            
+            var sourceRow = group.GridRow;
+            var sourceCol = group.GridColumn;
+            
+            // Check if target is occupied
+            var targetElement = GetElementAtCell(tabId, null, targetRow, targetCol);
+            
+            if (targetElement != null)
+            {
+                // Swap positions
+                if (targetElement is PinnedItem targetItem)
+                {
+                    targetItem.GridRow = sourceRow;
+                    targetItem.GridColumn = sourceCol;
+                }
+                else if (targetElement is Group targetGroup)
+                {
+                    targetGroup.GridRow = sourceRow;
+                    targetGroup.GridColumn = sourceCol;
+                }
+            }
+            
+            group.GridRow = targetRow;
+            group.GridColumn = targetCol;
+        }
+        else
+        {
+            var item = _pinnedItems.FirstOrDefault(p => p.Id == elementId);
+            if (item == null) return;
+            
+            var sourceRow = item.GridRow;
+            var sourceCol = item.GridColumn;
+            var sourceGroupId = item.GroupId;
+            
+            // If moving to a different group context
+            if (groupId != sourceGroupId)
+            {
+                item.GroupId = groupId;
+                // Reset position in new context
+                var (newRow, newCol) = GetNextAvailableCell(tabId, groupId, 10);
+                item.GridRow = newRow;
+                item.GridColumn = newCol;
+            }
+            else
+            {
+                // Same context - check for swap
+                var targetElement = GetElementAtCell(tabId, groupId, targetRow, targetCol);
+                
+                if (targetElement != null)
+                {
+                    // Swap positions
+                    if (targetElement is PinnedItem targetItem)
+                    {
+                        targetItem.GridRow = sourceRow;
+                        targetItem.GridColumn = sourceCol;
+                    }
+                    else if (targetElement is Group targetGroup && groupId == null)
+                    {
+                        targetGroup.GridRow = sourceRow;
+                        targetGroup.GridColumn = sourceCol;
+                    }
+                }
+                
+                item.GridRow = targetRow;
+                item.GridColumn = targetCol;
+            }
+        }
+        
         Save();
         PinnedItemsChanged?.Invoke(this, EventArgs.Empty);
     }
 
-    private void ReorderGroupsInTab(string? tabId)
+    /// <summary>
+    /// Move item to a group (folder)
+    /// </summary>
+    public void MoveItemToGroup(string itemId, string? targetGroupId, int gridColumns)
     {
-        var groupsInTab = _groups.Where(g => g.TabId == tabId).OrderBy(g => g.Order).ToList();
-        for (int i = 0; i < groupsInTab.Count; i++)
+        var item = _pinnedItems.FirstOrDefault(p => p.Id == itemId);
+        if (item == null) return;
+        
+        var oldGroupId = item.GroupId;
+        if (oldGroupId == targetGroupId) return;
+        
+        item.GroupId = targetGroupId;
+        
+        // Assign new grid position in target context
+        var tabId = item.TabId ?? DefaultTab.Id;
+        var (row, col) = GetNextAvailableCell(tabId, targetGroupId, gridColumns);
+        item.GridRow = row;
+        item.GridColumn = col;
+        
+        Save();
+        PinnedItemsChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>
+    /// Move item to a different tab
+    /// </summary>
+    public void MoveItemToTab(string itemId, string tabId, int gridColumns)
+    {
+        var item = _pinnedItems.FirstOrDefault(p => p.Id == itemId);
+        if (item == null) return;
+        
+        item.TabId = tabId;
+        item.GroupId = null;
+        
+        var (row, col) = GetNextAvailableCell(tabId, null, gridColumns);
+        item.GridRow = row;
+        item.GridColumn = col;
+        
+        Save();
+        PinnedItemsChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>
+    /// Compact all items in a tab (remove gaps) - used for Ordered mode
+    /// </summary>
+    /// <param name="fireEvent">If false, won't trigger PinnedItemsChanged event (prevents infinite loops during render)</param>
+    public void CompactItems(string? tabId, string? groupId, int gridColumns, bool fireEvent = true)
+    {
+        tabId ??= DefaultTab.Id;
+        
+        List<object> elements = new();
+        
+        if (groupId == null)
         {
-            groupsInTab[i].Order = i;
+            // Get all ungrouped items and groups, sorted by current position
+            var items = _pinnedItems
+                .Where(p => p.TabId == tabId && p.GroupId == null)
+                .OrderBy(p => p.GridRow)
+                .ThenBy(p => p.GridColumn)
+                .Cast<object>();
+            var groups = _groups
+                .Where(g => g.TabId == tabId)
+                .OrderBy(g => g.GridRow)
+                .ThenBy(g => g.GridColumn)
+                .Cast<object>();
+            
+            elements = items.Concat(groups).ToList();
+        }
+        else
+        {
+            elements = _pinnedItems
+                .Where(p => p.GroupId == groupId)
+                .OrderBy(p => p.GridRow)
+                .ThenBy(p => p.GridColumn)
+                .Cast<object>()
+                .ToList();
+        }
+        
+        // Reassign positions sequentially
+        int row = 0, col = 0;
+        foreach (var element in elements)
+        {
+            if (element is PinnedItem item)
+            {
+                item.GridRow = row;
+                item.GridColumn = col;
+            }
+            else if (element is Group group)
+            {
+                group.GridRow = row;
+                group.GridColumn = col;
+            }
+            
+            col++;
+            if (col >= gridColumns)
+            {
+                col = 0;
+                row++;
+            }
+        }
+        
+        Save();
+        if (fireEvent)
+        {
+            PinnedItemsChanged?.Invoke(this, EventArgs.Empty);
+        }
+    }
+
+    /// <summary>
+    /// Helper to assign grid positions to a list of items
+    /// </summary>
+    private void AssignGridPositionsToItems(List<PinnedItem> items, string? groupId, int gridColumns)
+    {
+        int row = 0, col = 0;
+        foreach (var item in items.Where(i => i.GroupId == groupId))
+        {
+            item.GridRow = row;
+            item.GridColumn = col;
+            col++;
+            if (col >= gridColumns)
+            {
+                col = 0;
+                row++;
+            }
         }
     }
 
@@ -462,11 +622,10 @@ public class PinnedItemsService : IDisposable
 
     #region Pinned Item Management
 
-    public void AddPin(string path, string? tabId = null, string? groupId = null)
+    public void AddPin(string path, string? tabId, string? groupId, int gridColumns)
     {
         if (string.IsNullOrWhiteSpace(path)) return;
         
-        // Check if already pinned
         if (_pinnedItems.Any(p => p.Path.Equals(path, StringComparison.OrdinalIgnoreCase)))
             return;
 
@@ -477,11 +636,6 @@ public class PinnedItemsService : IDisposable
 
         tabId ??= DefaultTab.Id;
 
-        var itemsInContext = _pinnedItems
-            .Where(p => p.TabId == tabId && p.GroupId == groupId)
-            .ToList();
-
-        // Determine the item type
         PinnedItemType itemType;
         if (isDirectory)
         {
@@ -496,22 +650,17 @@ public class PinnedItemsService : IDisposable
             itemType = PinnedItemType.Application;
         }
 
-        // Calculate GlobalOrder for ungrouped items
-        var globalOrder = 0;
-        if (groupId == null)
-        {
-            globalOrder = GetMaxGlobalOrder(tabId) + 1;
-        }
+        var (row, col) = GetNextAvailableCell(tabId, groupId, gridColumns);
 
         var item = new PinnedItem
         {
             Path = path,
             Name = Path.GetFileNameWithoutExtension(path) ?? Path.GetFileName(path),
             Type = itemType,
-            Order = itemsInContext.Count,
-            GlobalOrder = globalOrder,
             TabId = tabId,
-            GroupId = groupId
+            GroupId = groupId,
+            GridRow = row,
+            GridColumn = col
         };
 
         _pinnedItems.Add(item);
@@ -525,7 +674,6 @@ public class PinnedItemsService : IDisposable
         if (item != null)
         {
             _pinnedItems.Remove(item);
-            ReorderItemsInContext(item.TabId, item.GroupId);
             Save();
             PinnedItemsChanged?.Invoke(this, EventArgs.Empty);
         }
@@ -537,7 +685,6 @@ public class PinnedItemsService : IDisposable
         if (item != null)
         {
             _pinnedItems.Remove(item);
-            ReorderItemsInContext(item.TabId, item.GroupId);
             Save();
             PinnedItemsChanged?.Invoke(this, EventArgs.Empty);
         }
@@ -548,169 +695,18 @@ public class PinnedItemsService : IDisposable
         return _pinnedItems.Any(p => p.Path.Equals(path, StringComparison.OrdinalIgnoreCase));
     }
 
-    /// <summary>
-    /// Update a pinned item (e.g., after renaming)
-    /// </summary>
     public void UpdatePinnedItem(PinnedItem item)
     {
         var existingItem = _pinnedItems.FirstOrDefault(p => p.Id == item.Id);
         if (existingItem != null)
         {
-            // Update the properties that can be changed
             existingItem.CustomName = item.CustomName;
             existingItem.GridRow = item.GridRow;
             existingItem.GridColumn = item.GridColumn;
-            // Add other updatable properties here as needed
             
             Save();
             PinnedItemsChanged?.Invoke(this, EventArgs.Empty);
         }
-    }
-
-    /// <summary>
-    /// Clear grid positions for all items in a tab (used when switching to Ordered mode)
-    /// </summary>
-    public void ClearGridPositionsForTab(string? tabId)
-    {
-        tabId ??= DefaultTab.Id;
-        
-        var itemsInTab = _pinnedItems.Where(p => p.TabId == tabId).ToList();
-        foreach (var item in itemsInTab)
-        {
-            item.GridRow = null;
-            item.GridColumn = null;
-        }
-        
-        Save();
-        PinnedItemsChanged?.Invoke(this, EventArgs.Empty);
-    }
-
-    /// <summary>
-    /// Update grid position for a pinned item (used in FreeForm mode)
-    /// </summary>
-    public void UpdateItemGridPosition(string itemId, int? gridRow, int? gridColumn)
-    {
-        var item = _pinnedItems.FirstOrDefault(p => p.Id == itemId);
-        if (item != null)
-        {
-            item.GridRow = gridRow;
-            item.GridColumn = gridColumn;
-            Save();
-            PinnedItemsChanged?.Invoke(this, EventArgs.Empty);
-        }
-    }
-    
-    /// <summary>
-    /// Update grid position for a group (used in FreeForm mode)
-    /// </summary>
-    public void UpdateGroupGridPosition(string groupId, int? gridRow, int? gridColumn)
-    {
-        var group = _groups.FirstOrDefault(g => g.Id == groupId);
-        if (group != null)
-        {
-            group.GridRow = gridRow;
-            group.GridColumn = gridColumn;
-            Save();
-            PinnedItemsChanged?.Invoke(this, EventArgs.Empty);
-        }
-    }
-
-    public void MoveItem(string itemId, int toIndex, string? targetTabId = null, string? targetGroupId = null)
-    {
-        var item = _pinnedItems.FirstOrDefault(p => p.Id == itemId);
-        if (item == null) return;
-
-        var sourceTabId = item.TabId;
-        var sourceGroupId = item.GroupId;
-
-        // Update tab and group if moving to different context
-        if (targetTabId != null)
-            item.TabId = targetTabId;
-        if (targetGroupId != null || (targetTabId != null && targetGroupId == null))
-            item.GroupId = targetGroupId;
-
-        // Get items in target context
-        var itemsInTarget = _pinnedItems
-            .Where(p => p.TabId == item.TabId && p.GroupId == item.GroupId && p.Id != item.Id)
-            .OrderBy(p => p.Order)
-            .ToList();
-
-        // Insert at new position
-        toIndex = Math.Max(0, Math.Min(toIndex, itemsInTarget.Count));
-        itemsInTarget.Insert(toIndex, item);
-
-        // Reorder
-        for (int i = 0; i < itemsInTarget.Count; i++)
-        {
-            itemsInTarget[i].Order = i;
-        }
-
-        // Reorder source context if different
-        if (sourceTabId != item.TabId || sourceGroupId != item.GroupId)
-        {
-            ReorderItemsInContext(sourceTabId, sourceGroupId);
-        }
-
-        Save();
-        PinnedItemsChanged?.Invoke(this, EventArgs.Empty);
-    }
-
-    public void MoveItem(int fromIndex, int toIndex)
-    {
-        if (fromIndex < 0 || fromIndex >= _pinnedItems.Count) return;
-        if (toIndex < 0 || toIndex >= _pinnedItems.Count) return;
-
-        var item = _pinnedItems[fromIndex];
-        _pinnedItems.RemoveAt(fromIndex);
-        _pinnedItems.Insert(toIndex, item);
-        ReorderItems();
-        Save();
-        PinnedItemsChanged?.Invoke(this, EventArgs.Empty);
-    }
-
-    public void MoveItemToGroup(string itemId, string? groupId)
-    {
-        var item = _pinnedItems.FirstOrDefault(p => p.Id == itemId);
-        if (item == null) return;
-
-        var oldGroupId = item.GroupId;
-        item.GroupId = groupId;
-
-        // Reorder old context
-        ReorderItemsInContext(item.TabId, oldGroupId);
-
-        // Set order in new context
-        var itemsInNewContext = _pinnedItems
-            .Where(p => p.TabId == item.TabId && p.GroupId == groupId && p.Id != item.Id)
-            .ToList();
-        item.Order = itemsInNewContext.Count;
-
-        Save();
-        PinnedItemsChanged?.Invoke(this, EventArgs.Empty);
-    }
-
-    public void MoveItemToTab(string itemId, string tabId)
-    {
-        var item = _pinnedItems.FirstOrDefault(p => p.Id == itemId);
-        if (item == null) return;
-
-        var oldTabId = item.TabId;
-        var oldGroupId = item.GroupId;
-        
-        item.TabId = tabId;
-        item.GroupId = null; // Remove from group when moving to different tab
-
-        // Reorder old context
-        ReorderItemsInContext(oldTabId, oldGroupId);
-
-        // Set order in new context
-        var itemsInNewContext = _pinnedItems
-            .Where(p => p.TabId == tabId && p.GroupId == null && p.Id != item.Id)
-            .ToList();
-        item.Order = itemsInNewContext.Count;
-
-        Save();
-        PinnedItemsChanged?.Invoke(this, EventArgs.Empty);
     }
 
     /// <summary>
@@ -722,7 +718,8 @@ public class PinnedItemsService : IDisposable
         
         return _pinnedItems
             .Where(p => p.TabId == tabId && p.GroupId == groupId)
-            .OrderBy(p => p.Order);
+            .OrderBy(p => p.GridRow)
+            .ThenBy(p => p.GridColumn);
     }
 
     /// <summary>
@@ -740,28 +737,36 @@ public class PinnedItemsService : IDisposable
     public IEnumerable<Group> GetGroupsForTab(string? tabId)
     {
         tabId ??= DefaultTab.Id;
-        return _groups.Where(g => g.TabId == tabId).OrderBy(g => g.Order);
+        return _groups
+            .Where(g => g.TabId == tabId)
+            .OrderBy(g => g.GridRow)
+            .ThenBy(g => g.GridColumn);
     }
 
-    private void ReorderItems()
+    /// <summary>
+    /// Get all elements (items + groups) for a tab, sorted by grid position
+    /// </summary>
+    public List<object> GetAllElementsForTab(string? tabId)
     {
-        for (int i = 0; i < _pinnedItems.Count; i++)
+        tabId ??= DefaultTab.Id;
+        
+        var elements = new List<(object element, int row, int col)>();
+        
+        foreach (var item in _pinnedItems.Where(p => p.TabId == tabId && p.GroupId == null))
         {
-            _pinnedItems[i].Order = i;
+            elements.Add((item, item.GridRow, item.GridColumn));
         }
-    }
-
-    private void ReorderItemsInContext(string? tabId, string? groupId)
-    {
-        var items = _pinnedItems
-            .Where(p => p.TabId == tabId && p.GroupId == groupId)
-            .OrderBy(p => p.Order)
+        
+        foreach (var group in _groups.Where(g => g.TabId == tabId))
+        {
+            elements.Add((group, group.GridRow, group.GridColumn));
+        }
+        
+        return elements
+            .OrderBy(e => e.row)
+            .ThenBy(e => e.col)
+            .Select(e => e.element)
             .ToList();
-
-        for (int i = 0; i < items.Count; i++)
-        {
-            items[i].Order = i;
-        }
     }
 
     #endregion

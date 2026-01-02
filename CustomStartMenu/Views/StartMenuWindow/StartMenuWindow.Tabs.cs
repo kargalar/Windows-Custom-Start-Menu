@@ -56,7 +56,8 @@ public partial class StartMenuWindow
         {
             if (_draggedItem != null)
             {
-                _pinnedItemsService.MoveItemToTab(_draggedItem.Id, tab.Id);
+                var gridColumns = CalculateGridColumns();
+                _pinnedItemsService.MoveItemToTab(_draggedItem.Id, tab.Id, gridColumns);
                 _currentTabId = tab.Id;
                 RefreshTabs();
                 RefreshPinnedItems();

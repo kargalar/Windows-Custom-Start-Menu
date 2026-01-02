@@ -116,12 +116,12 @@ public class HotkeyConfig
 public enum LayoutMode
 {
     /// <summary>
-    /// Items are automatically arranged in a sequential grid
+    /// Items are automatically compacted - no gaps between items
     /// </summary>
     Ordered,
 
     /// <summary>
-    /// Items can be placed at specific grid positions by the user
+    /// Items stay at their placed grid positions - gaps allowed
     /// </summary>
     FreeForm
 }

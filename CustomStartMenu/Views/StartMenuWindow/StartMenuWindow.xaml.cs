@@ -43,28 +43,20 @@ public partial class StartMenuWindow : Window
     private string? _currentTabId;
     private string? _openGroupId; // Currently open group (folder view)
     
-    // Drag & Drop
+    // Drag & Drop (grid-based)
     private Point _dragStartPoint;
     private bool _isDragging;
     private PinnedItem? _draggedItem;
-    private Button? _draggedButton;
-    
-    // Group Drag & Drop
     private Group? _draggedGroup;
-    private Button? _draggedGroupButton;
+    private Button? _draggedButton;
+    private Border? _dropIndicator;
     
     // Prevent duplicate character input
     private DateTime _lastCharInputTime = DateTime.MinValue;
     private char _lastCharInput = '\0';
     
-    // Drop indicator for visual feedback during drag
-    private Border? _dropIndicator;
-    private int _lastDropIndex = -1;
-    
-    // FreeForm drop indicator
-    private Border? _freeFormDropIndicator;
-    private int _lastFreeFormRow = -1;
-    private int _lastFreeFormCol = -1;
+    // Group folder original border state for drag visual feedback
+    private readonly Dictionary<Button, (Brush? BorderBrush, Thickness BorderThickness)> _groupFolderOriginalBorders = new();
     
     // Mouse hook for click outside detection
     private readonly MouseHookService _mouseHookService;

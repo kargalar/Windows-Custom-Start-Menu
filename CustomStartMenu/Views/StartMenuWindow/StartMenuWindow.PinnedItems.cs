@@ -1,14 +1,14 @@
+using System.Diagnostics;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
-using System.Windows.Media.Animation;
 using CustomStartMenu.Models;
 
 namespace CustomStartMenu.Views;
 
 /// <summary>
-/// Pinned items display and management for the Start Menu
+/// Grid-based pinned items display for the Start Menu
 /// </summary>
 public partial class StartMenuWindow
 {
@@ -33,13 +33,12 @@ public partial class StartMenuWindow
             var group = _pinnedItemsService.Groups.FirstOrDefault(g => g.Id == _openGroupId);
             if (group != null)
             {
-                // Show group content view
                 ShowGroupContent(group, currentTabId);
                 return;
             }
             else
             {
-                _openGroupId = null; // Group was deleted
+                _openGroupId = null;
             }
         }
 
@@ -54,103 +53,52 @@ public partial class StartMenuWindow
         }
 
         EmptyState.Visibility = Visibility.Collapsed;
+        
+        RenderGridLayout(ungroupedItems, groups, currentTabId);
+    }
 
-        // Check layout mode
+    /// <summary>
+    /// Render items and groups in a grid layout
+    /// </summary>
+    private void RenderGridLayout(List<PinnedItem> items, List<Group> groups, string currentTabId)
+    {
+        var itemSize = _settingsService.Settings.ItemSize;
+        var cellSize = itemSize + 8;
         var layoutMode = _settingsService.Settings.PinnedItemsLayout;
-
-        if (layoutMode == LayoutMode.FreeForm)
-        {
-            // FreeForm mode: Use Grid for positioning
-            RenderFreeFormLayout(ungroupedItems, groups, currentTabId);
-        }
-        else
-        {
-            // Ordered mode: Use WrapPanel for auto-arrangement
-            RenderOrderedLayout(ungroupedItems, groups, currentTabId);
-        }
-    }
-
-    /// <summary>
-    /// Render items in Ordered layout mode using WrapPanel (auto-arrangement)
-    /// </summary>
-    private void RenderOrderedLayout(List<PinnedItem> ungroupedItems, List<Group> groups, string currentTabId)
-    {
-        var showIconsOnly = _settingsService.Settings.ShowIconsOnly;
-        var itemSize = _settingsService.Settings.ItemSize;
         
-        // Get available width for items
-        var availableWidth = PinnedScrollViewer.ActualWidth > 0 ? PinnedScrollViewer.ActualWidth - 16 : 600; // -16 for padding
-        
-        // Use ItemSize directly as button size
-        double buttonSize = itemSize;
-        double margin = 8.0; // 4px margin on each side
-        double itemWidth = buttonSize + margin;
-        
-        // Calculate items per row based on item size
-        var itemsPerRow = Math.Max(1, (int)(availableWidth / itemWidth));
-        var totalWidth = itemsPerRow * itemWidth;
-
-        // Create a single WrapPanel for both items and group folders
-        var mainWrapPanel = new WrapPanel
-        {
-            Orientation = Orientation.Horizontal,
-            AllowDrop = true,
-            HorizontalAlignment = System.Windows.HorizontalAlignment.Center, // Center the items
-            Width = totalWidth // Set fixed width for centering
-        };
-
-        mainWrapPanel.Drop += WrapPanel_Drop;
-        mainWrapPanel.DragOver += WrapPanel_DragOver;
-
-        // Get all elements sorted by GlobalOrder (mixed items and groups)
-        var sortedElements = _pinnedItemsService.GetSortedElementsForTab(currentTabId);
-        
-        foreach (var element in sortedElements)
-        {
-            if (element is PinnedItem item)
-            {
-                var button = CreatePinnedItemButton(item, buttonSize);
-                mainWrapPanel.Children.Add(button);
-            }
-            else if (element is Group group)
-            {
-                var groupButton = CreateGroupFolderButton(group, currentTabId, buttonSize);
-                mainWrapPanel.Children.Add(groupButton);
-            }
-        }
-
-        PinnedItemsContainer.Children.Add(mainWrapPanel);
-    }
-
-    /// <summary>
-    /// Render items in FreeForm layout mode using Grid (user-positioned)
-    /// </summary>
-    private void RenderFreeFormLayout(List<PinnedItem> ungroupedItems, List<Group> groups, string currentTabId)
-    {
-        var itemSize = _settingsService.Settings.ItemSize;
-        var cellSize = itemSize + 8; // Button size + margin
-        
-        // Calculate grid dimensions based on available space
-        var availableWidth = PinnedScrollViewer.ActualWidth > 0 ? PinnedScrollViewer.ActualWidth : 600;
+        var availableWidth = PinnedScrollViewer.ActualWidth > 0 ? PinnedScrollViewer.ActualWidth - 16 : 600;
+        var availableHeight = PinnedScrollViewer.ActualHeight > 0 ? PinnedScrollViewer.ActualHeight : 500;
         var columns = Math.Max(1, (int)(availableWidth / cellSize));
         
-        // Calculate required rows based on items with positions and items without
-        var itemsWithPositions = ungroupedItems.Where(i => i.GridRow.HasValue && i.GridColumn.HasValue).ToList();
-        var itemsWithoutPositions = ungroupedItems.Where(i => !i.GridRow.HasValue || !i.GridColumn.HasValue).ToList();
+        // Calculate rows needed based on items
+        int maxItemRow = 0;
+        foreach (var item in items)
+        {
+            maxItemRow = Math.Max(maxItemRow, item.GridRow);
+        }
+        foreach (var group in groups)
+        {
+            maxItemRow = Math.Max(maxItemRow, group.GridRow);
+        }
         
-        var maxRow = itemsWithPositions.Any() ? itemsWithPositions.Max(i => i.GridRow!.Value) : -1;
-        var totalItemsCount = ungroupedItems.Count + groups.Count;
-        var minRows = (int)Math.Ceiling((double)totalItemsCount / columns);
-        var rows = Math.Max(minRows, maxRow + 1) + 2; // Extra rows for expansion
-
-        // Create the grid
+        // In FreeForm mode, ensure grid covers at least the visible area of ScrollViewer
+        // This allows dropping items anywhere in the visible area
+        int minRowsForVisibleArea = Math.Max(1, (int)(availableHeight / cellSize) + 1);
+        var rows = Math.Max(maxItemRow + 2, minRowsForVisibleArea);
+        
+        // Create grid
         var grid = new Grid
         {
             AllowDrop = true,
-            Background = Brushes.Transparent // Needed for drop events
+            Background = Brushes.Transparent,
+            HorizontalAlignment = HorizontalAlignment.Center
         };
-        grid.Drop += FreeFormGrid_Drop;
-        grid.DragOver += FreeFormGrid_DragOver;
+        
+        // Attach drag-drop events
+        grid.DragOver += ItemsGrid_DragOver;
+        grid.DragLeave += ItemsGrid_DragLeave;
+        grid.Drop += ItemsGrid_Drop;
+        grid.MouseRightButtonUp += ItemsGrid_MouseRightButtonUp;
 
         // Define columns
         for (int c = 0; c < columns; c++)
@@ -164,82 +112,36 @@ public partial class StartMenuWindow
             grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(cellSize) });
         }
 
-        // Track occupied cells
-        var occupiedCells = new HashSet<(int row, int col)>();
-
-        // Place items with positions first
-        foreach (var item in itemsWithPositions)
+        // In Ordered mode, compact items first (without firing event to prevent infinite loop)
+        if (layoutMode == LayoutMode.Ordered)
         {
-            var row = item.GridRow!.Value;
-            var col = item.GridColumn!.Value;
-            
-            // Ensure within bounds
-            if (row < rows && col < columns)
-            {
-                var button = CreatePinnedItemButton(item, itemSize);
-                Grid.SetRow(button, row);
-                Grid.SetColumn(button, col);
-                grid.Children.Add(button);
-                occupiedCells.Add((row, col));
-            }
+            _pinnedItemsService.CompactItems(currentTabId, null, columns, fireEvent: false);
+            // Refresh lists after compacting
+            items = _pinnedItemsService.GetUngroupedItemsForTab(currentTabId).ToList();
+            groups = _pinnedItemsService.GetGroupsForTab(currentTabId).ToList();
         }
 
-        // Auto-place items without positions
-        var nextRow = 0;
-        var nextCol = 0;
-        
-        foreach (var item in itemsWithoutPositions.OrderBy(i => i.Order))
+        // Place items
+        foreach (var item in items)
         {
-            // Find next available cell
-            while (occupiedCells.Contains((nextRow, nextCol)))
+            if (item.GridRow < rows && item.GridColumn < columns)
             {
-                nextCol++;
-                if (nextCol >= columns)
-                {
-                    nextCol = 0;
-                    nextRow++;
-                }
-            }
-
-            var button = CreatePinnedItemButton(item, itemSize);
-            Grid.SetRow(button, nextRow);
-            Grid.SetColumn(button, nextCol);
-            grid.Children.Add(button);
-            occupiedCells.Add((nextRow, nextCol));
-
-            nextCol++;
-            if (nextCol >= columns)
-            {
-                nextCol = 0;
-                nextRow++;
+                var button = CreatePinnedItemButton(item, itemSize);
+                Grid.SetRow(button, item.GridRow);
+                Grid.SetColumn(button, item.GridColumn);
+                grid.Children.Add(button);
             }
         }
 
         // Place groups
-        foreach (var group in groups.OrderBy(g => g.Order))
+        foreach (var group in groups)
         {
-            // Find next available cell
-            while (occupiedCells.Contains((nextRow, nextCol)))
+            if (group.GridRow < rows && group.GridColumn < columns)
             {
-                nextCol++;
-                if (nextCol >= columns)
-                {
-                    nextCol = 0;
-                    nextRow++;
-                }
-            }
-
-            var groupButton = CreateGroupFolderButton(group, currentTabId, itemSize);
-            Grid.SetRow(groupButton, nextRow);
-            Grid.SetColumn(groupButton, nextCol);
-            grid.Children.Add(groupButton);
-            occupiedCells.Add((nextRow, nextCol));
-
-            nextCol++;
-            if (nextCol >= columns)
-            {
-                nextCol = 0;
-                nextRow++;
+                var button = CreateGroupFolderButton(group, currentTabId, itemSize);
+                Grid.SetRow(button, group.GridRow);
+                Grid.SetColumn(button, group.GridColumn);
+                grid.Children.Add(button);
             }
         }
 
@@ -284,19 +186,65 @@ public partial class StartMenuWindow
         headerPanel.Children.Add(groupTitle);
         contentPanel.Children.Add(headerPanel);
 
-        // Group items
+        // Group items in grid
         var items = _pinnedItemsService.GetItemsForTab(tabId, group.Id).ToList();
         
         if (items.Any())
         {
-            var wrapPanel = CreateItemsWrapPanel(items, group.Id);
-            contentPanel.Children.Add(wrapPanel);
+            var itemSize = _settingsService.Settings.ItemSize;
+            var cellSize = itemSize + 8;
+            var availableWidth = PinnedScrollViewer.ActualWidth > 0 ? PinnedScrollViewer.ActualWidth - 16 : 600;
+            var columns = Math.Max(1, (int)(availableWidth / cellSize));
+            
+            // In Ordered mode, compact items (without firing event to prevent infinite loop)
+            if (_settingsService.Settings.PinnedItemsLayout == LayoutMode.Ordered)
+            {
+                _pinnedItemsService.CompactItems(tabId, group.Id, columns, fireEvent: false);
+                items = _pinnedItemsService.GetItemsForTab(tabId, group.Id).ToList();
+            }
+            
+            int maxRow = items.Any() ? items.Max(i => i.GridRow) : 0;
+            var rows = maxRow + 2;
+            
+            var grid = new Grid
+            {
+                AllowDrop = true,
+                Background = Brushes.Transparent,
+                HorizontalAlignment = HorizontalAlignment.Center
+            };
+            
+            grid.DragOver += ItemsGrid_DragOver;
+            grid.DragLeave += ItemsGrid_DragLeave;
+            grid.Drop += ItemsGrid_Drop;
+
+            for (int c = 0; c < columns; c++)
+            {
+                grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(cellSize) });
+            }
+
+            for (int r = 0; r < rows; r++)
+            {
+                grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(cellSize) });
+            }
+
+            foreach (var item in items)
+            {
+                if (item.GridRow < rows && item.GridColumn < columns)
+                {
+                    var button = CreatePinnedItemButton(item, itemSize);
+                    Grid.SetRow(button, item.GridRow);
+                    Grid.SetColumn(button, item.GridColumn);
+                    grid.Children.Add(button);
+                }
+            }
+
+            contentPanel.Children.Add(grid);
         }
         else
         {
             var emptyText = new TextBlock
             {
-                Text = "Bu grup boş. Öğeleri buraya sürükleyebilirsiniz.",
+                Text = "Bu klasör boş. Öğeleri buraya sürükleyebilirsiniz.",
                 FontSize = 13,
                 Foreground = (Brush)FindResource("TextSecondaryBrush"),
                 FontStyle = FontStyles.Italic,
@@ -309,21 +257,16 @@ public partial class StartMenuWindow
         PinnedItemsContainer.Children.Add(contentPanel);
     }
 
-    private Button CreateGroupFolderButton(Group group, string tabId, double? customSize = null)
+    private Button CreateGroupFolderButton(Group group, string tabId, double buttonSize)
     {
         var showIconsOnly = _settingsService.Settings.ShowIconsOnly;
         var itemCount = _pinnedItemsService.GetItemsForTab(tabId, group.Id).Count();
-        
-        // Calculate button size
-        var buttonSize = customSize ?? (showIconsOnly ? 60.0 : 100.0);
         var isSmallMode = buttonSize < 80;
         
-        // Adjust sizes based on button size
         var folderSize = Math.Max(24, buttonSize * (showIconsOnly || isSmallMode ? 0.53 : 0.48));
         var folderFontSize = Math.Max(14, buttonSize * 0.28);
         var folderMargin = showIconsOnly || isSmallMode ? new Thickness(0) : new Thickness(0, 0, 0, 8);
 
-        // Folder visual - show mini previews of first items
         var folderVisual = new Grid
         {
             Width = folderSize,
@@ -331,7 +274,6 @@ public partial class StartMenuWindow
             Margin = folderMargin
         };
 
-        // Folder background
         var folderBg = new Border
         {
             Background = new SolidColorBrush(Color.FromArgb(60, 255, 200, 100)),
@@ -341,7 +283,6 @@ public partial class StartMenuWindow
         };
         folderVisual.Children.Add(folderBg);
 
-        // Folder icon
         var folderIcon = new TextBlock
         {
             Text = "📁",
@@ -351,7 +292,6 @@ public partial class StartMenuWindow
         };
         folderVisual.Children.Add(folderIcon);
 
-        // Item count badge
         if (itemCount > 0)
         {
             var badge = new Border
@@ -373,22 +313,16 @@ public partial class StartMenuWindow
             folderVisual.Children.Add(badge);
         }
 
-        // Create content based on mode
         UIElement buttonContent;
         var textMaxWidth = Math.Max(50, buttonSize - 20);
         
         if (showIconsOnly || isSmallMode)
         {
-            // Icon only - no text label
             buttonContent = folderVisual;
         }
         else
         {
-            // Full mode - icon with text label
-            var folderContent = new StackPanel
-            {
-                HorizontalAlignment = HorizontalAlignment.Center
-            };
+            var folderContent = new StackPanel { HorizontalAlignment = HorizontalAlignment.Center };
             folderContent.Children.Add(folderVisual);
             folderContent.Children.Add(new TextBlock
             {
@@ -403,7 +337,6 @@ public partial class StartMenuWindow
             buttonContent = folderContent;
         }
 
-        // Create button with custom size
         var button = new Button
         {
             Tag = group,
@@ -413,19 +346,21 @@ public partial class StartMenuWindow
             Width = buttonSize,
             Height = buttonSize,
             Margin = new Thickness(4),
-            Cursor = System.Windows.Input.Cursors.Hand,
+            Cursor = Cursors.Hand,
             Background = Brushes.Transparent,
             BorderThickness = new Thickness(0)
         };
         
-        // Apply custom style
         button.Style = CreateDynamicPinnedItemStyle();
 
         // Click to open folder
         button.Click += (s, e) =>
         {
-            _openGroupId = group.Id;
-            RefreshPinnedItems();
+            if (!_isDragging)
+            {
+                _openGroupId = group.Id;
+                RefreshPinnedItems();
+            }
         };
 
         // Right-click context menu
@@ -435,7 +370,7 @@ public partial class StartMenuWindow
             e.Handled = true;
         };
 
-        // Drop onto folder
+        // Drop item onto folder
         button.Drop += GroupFolder_Drop;
         button.DragOver += GroupFolder_DragOver;
         button.DragEnter += GroupFolder_DragEnter;
@@ -449,40 +384,19 @@ public partial class StartMenuWindow
         return button;
     }
 
-    private WrapPanel CreateItemsWrapPanel(IEnumerable<PinnedItem> items, string? groupId)
-    {
-        var wrapPanel = new WrapPanel
-        {
-            Orientation = Orientation.Horizontal,
-            Tag = groupId // For drag & drop
-        };
-
-        wrapPanel.AllowDrop = true;
-        wrapPanel.Drop += WrapPanel_Drop;
-        wrapPanel.DragOver += WrapPanel_DragOver;
-
-        foreach (var item in items.OrderBy(i => i.Order))
-        {
-            var button = CreatePinnedItemButton(item);
-            wrapPanel.Children.Add(button);
-        }
-
-        return wrapPanel;
-    }
-
     private void ShowGroupContextMenu(Group group, UIElement target)
     {
         var contextMenu = new ContextMenu();
 
-        var renameItem = new MenuItem { Header = "Grubu Yeniden Adlandır" };
+        var renameItem = new MenuItem { Header = "Klasörü Yeniden Adlandır" };
         renameItem.Click += (s, e) => ShowRenameGroupDialog(group);
 
-        var deleteItem = new MenuItem { Header = "Grubu Sil" };
+        var deleteItem = new MenuItem { Header = "Klasörü Sil" };
         deleteItem.Click += (s, e) =>
         {
             var result = MessageBox.Show(
-                $"'{group.Name}' grubunu silmek istediğinizden emin misiniz?\nİçindeki öğeler grupsuz olacak.",
-                "Grubu Sil",
+                $"'{group.Name}' klasörünü silmek istediğinizden emin misiniz?\nİçindeki öğeler klasörsüz olacak.",
+                "Klasörü Sil",
                 MessageBoxButton.YesNo,
                 MessageBoxImage.Question);
 
@@ -504,7 +418,7 @@ public partial class StartMenuWindow
     {
         var dialog = new Window
         {
-            Title = "Grubu Yeniden Adlandır",
+            Title = "Klasörü Yeniden Adlandır",
             Width = 300,
             Height = 120,
             WindowStartupLocation = WindowStartupLocation.CenterScreen,
@@ -542,24 +456,18 @@ public partial class StartMenuWindow
         dialog.ShowDialog();
     }
 
-    private Button CreatePinnedItemButton(PinnedItem item, double? customSize = null)
+    private Button CreatePinnedItemButton(PinnedItem item, double buttonSize)
     {
         var showIconsOnly = _settingsService.Settings.ShowIconsOnly;
-        
-        // Calculate button size - use custom size if provided
-        var buttonSize = customSize ?? (showIconsOnly ? 60.0 : 100.0);
         var isSmallMode = buttonSize < 80;
         
-        // Get real icon from IconService - use special method for internet shortcuts
         var icon = item.Type == PinnedItemType.InternetShortcut 
             ? _iconService.GetInternetShortcutIcon(item.Path)
             : _iconService.GetIcon(item.Path);
 
-        // Adjust icon size based on button size
         var iconSize = Math.Max(24, buttonSize * (showIconsOnly ? 0.53 : 0.4));
         var iconMargin = showIconsOnly || isSmallMode ? new Thickness(0) : new Thickness(0, 0, 0, 8);
 
-        // Determine fallback emoji based on item type
         var fallbackEmoji = item.Type switch
         {
             PinnedItemType.Folder => "📁",
@@ -586,18 +494,15 @@ public partial class StartMenuWindow
                 Margin = iconMargin 
             };
 
-        // Create content based on icon-only mode
         UIElement buttonContent;
-        var textMaxWidth = Math.Max(50, buttonSize - 20); // Text width based on button size
+        var textMaxWidth = Math.Max(50, buttonSize - 20);
         
         if (showIconsOnly || isSmallMode)
         {
-            // Icon only - no text label
             buttonContent = iconElement;
         }
         else
         {
-            // Full mode - icon with text label
             var nameTextBlock = new TextBlock 
             { 
                 Text = item.DisplayName, 
@@ -628,25 +533,17 @@ public partial class StartMenuWindow
             renameTextBox.KeyDown += RenameTextBox_KeyDown;
             renameTextBox.LostFocus += RenameTextBox_LostFocus;
             
-            var nameContainer = new Grid
-            {
-                HorizontalAlignment = HorizontalAlignment.Center
-            };
+            var nameContainer = new Grid { HorizontalAlignment = HorizontalAlignment.Center };
             nameContainer.Children.Add(nameTextBlock);
             nameContainer.Children.Add(renameTextBox);
             
             buttonContent = new StackPanel
             {
                 HorizontalAlignment = HorizontalAlignment.Center,
-                Children =
-                {
-                    iconElement,
-                    nameContainer
-                }
+                Children = { iconElement, nameContainer }
             };
         }
 
-        // Create button with custom size if provided
         var button = new Button
         {
             Tag = item,
@@ -655,19 +552,18 @@ public partial class StartMenuWindow
             Width = buttonSize,
             Height = buttonSize,
             Margin = new Thickness(4),
-            Cursor = System.Windows.Input.Cursors.Hand,
+            Cursor = Cursors.Hand,
             AllowDrop = true,
             Background = Brushes.Transparent,
             BorderThickness = new Thickness(0)
         };
         
-        // Apply custom template for hover effects
         button.Style = CreateDynamicPinnedItemStyle();
 
         button.Click += PinnedItem_Click;
         button.MouseRightButtonUp += PinnedItem_RightClick;
         
-        // Drag & Drop events
+        // Drag events
         button.PreviewMouseLeftButtonDown += PinnedItem_PreviewMouseLeftButtonDown;
         button.PreviewMouseMove += PinnedItem_PreviewMouseMove;
         button.PreviewMouseLeftButtonUp += PinnedItem_PreviewMouseLeftButtonUp;
@@ -675,9 +571,6 @@ public partial class StartMenuWindow
         return button;
     }
     
-    /// <summary>
-    /// Creates a dynamic style for pinned item buttons with hover effects
-    /// </summary>
     private Style CreateDynamicPinnedItemStyle()
     {
         var style = new Style(typeof(Button));
@@ -685,7 +578,7 @@ public partial class StartMenuWindow
         style.Setters.Add(new Setter(Button.BackgroundProperty, Brushes.Transparent));
         style.Setters.Add(new Setter(Button.ForegroundProperty, FindResource("TextBrush")));
         style.Setters.Add(new Setter(Button.BorderThicknessProperty, new Thickness(0)));
-        style.Setters.Add(new Setter(Button.CursorProperty, System.Windows.Input.Cursors.Hand));
+        style.Setters.Add(new Setter(Button.CursorProperty, Cursors.Hand));
         
         var template = new ControlTemplate(typeof(Button));
         var border = new FrameworkElementFactory(typeof(Border));
@@ -703,7 +596,6 @@ public partial class StartMenuWindow
         
         template.VisualTree = border;
         
-        // Add triggers for hover and pressed states
         var mouseOverTrigger = new Trigger { Property = UIElement.IsMouseOverProperty, Value = true };
         mouseOverTrigger.Setters.Add(new Setter(Border.BackgroundProperty, new SolidColorBrush(Color.FromArgb(48, 255, 255, 255)), "border"));
         template.Triggers.Add(mouseOverTrigger);
@@ -719,7 +611,6 @@ public partial class StartMenuWindow
 
     private void PinnedItem_Click(object sender, RoutedEventArgs e)
     {
-        // Don't launch if we were dragging
         if (_isDragging) return;
         
         if (sender is Button button && button.Tag is PinnedItem item)
@@ -733,6 +624,7 @@ public partial class StartMenuWindow
         if (sender is Button button && button.Tag is PinnedItem item)
         {
             var contextMenu = new ContextMenu();
+            var gridColumns = CalculateGridColumns();
 
             var openItem = new MenuItem { Header = "Aç" };
             openItem.Click += (s, args) => LaunchItem(item.Path);
@@ -740,15 +632,14 @@ public partial class StartMenuWindow
             var openLocationItem = new MenuItem { Header = "Dosya konumunu aç" };
             openLocationItem.Click += (s, args) => OpenFileLocation(item.Path);
 
-            // Rename menu item
             var renameItem = new MenuItem { Header = "Yeniden Adlandır" };
             renameItem.Click += (s, args) => StartInlineRename(button, item);
 
             // Move to group submenu
-            var moveToGroupMenu = new MenuItem { Header = "Gruba Taşı" };
+            var moveToGroupMenu = new MenuItem { Header = "Klasöre Ekle" };
             
-            var noGroupItem = new MenuItem { Header = "(Grupsuz)" };
-            noGroupItem.Click += (s, args) => _pinnedItemsService.MoveItemToGroup(item.Id, null);
+            var noGroupItem = new MenuItem { Header = "(Klasörsüz)" };
+            noGroupItem.Click += (s, args) => _pinnedItemsService.MoveItemToGroup(item.Id, null, gridColumns);
             moveToGroupMenu.Items.Add(noGroupItem);
             
             var groups = _pinnedItemsService.GetGroupsForTab(_currentTabId).ToList();
@@ -758,7 +649,7 @@ public partial class StartMenuWindow
                 foreach (var group in groups)
                 {
                     var groupItem = new MenuItem { Header = group.Name };
-                    groupItem.Click += (s, args) => _pinnedItemsService.MoveItemToGroup(item.Id, group.Id);
+                    groupItem.Click += (s, args) => _pinnedItemsService.MoveItemToGroup(item.Id, group.Id, gridColumns);
                     moveToGroupMenu.Items.Add(groupItem);
                 }
             }
@@ -772,18 +663,12 @@ public partial class StartMenuWindow
                     Header = tab.Name,
                     IsEnabled = tab.Id != _currentTabId
                 };
-                tabItem.Click += (s, args) =>
-                {
-                    _pinnedItemsService.MoveItemToTab(item.Id, tab.Id);
-                };
+                tabItem.Click += (s, args) => _pinnedItemsService.MoveItemToTab(item.Id, tab.Id, gridColumns);
                 moveToTabMenu.Items.Add(tabItem);
             }
 
             var unpinItem = new MenuItem { Header = "Sabitlemeyi kaldır" };
-            unpinItem.Click += (s, args) =>
-            {
-                _pinnedItemsService.RemovePinById(item.Id);
-            };
+            unpinItem.Click += (s, args) => _pinnedItemsService.RemovePinById(item.Id);
 
             contextMenu.Items.Add(openItem);
             contextMenu.Items.Add(openLocationItem);
@@ -800,22 +685,11 @@ public partial class StartMenuWindow
         }
     }
 
-    private void ShowEmptySpaceContextMenu(Point position)
-    {
-        var contextMenu = new ContextMenu();
-
-        var createGroupItem = new MenuItem { Header = "Yeni Grup Oluştur" };
-        createGroupItem.Click += (s, e) => ShowCreateGroupDialog();
-
-        contextMenu.Items.Add(createGroupItem);
-        contextMenu.IsOpen = true;
-    }
-
     private void ShowCreateGroupDialog()
     {
         var dialog = new Window
         {
-            Title = "Yeni Grup",
+            Title = "Yeni Klasör",
             Width = 300,
             Height = 120,
             WindowStartupLocation = WindowStartupLocation.CenterScreen,
@@ -824,7 +698,7 @@ public partial class StartMenuWindow
         };
 
         var panel = new StackPanel { Margin = new Thickness(16) };
-        var textBox = new TextBox { Text = "Yeni Grup", Margin = new Thickness(0, 0, 0, 12) };
+        var textBox = new TextBox { Text = "Yeni Klasör", Margin = new Thickness(0, 0, 0, 12) };
         var buttonPanel = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
         
         var okButton = new Button { Content = "Oluştur", Width = 75, Margin = new Thickness(0, 0, 8, 0) };
@@ -834,7 +708,8 @@ public partial class StartMenuWindow
         {
             if (!string.IsNullOrWhiteSpace(textBox.Text))
             {
-                _pinnedItemsService.AddGroup(textBox.Text, _currentTabId);
+                var gridColumns = CalculateGridColumns();
+                _pinnedItemsService.AddGroup(textBox.Text, _currentTabId, gridColumns);
                 dialog.Close();
             }
         };
@@ -852,4 +727,7 @@ public partial class StartMenuWindow
 
         dialog.ShowDialog();
     }
+
+    // NOTE: Inline rename methods (StartInlineRename, RenameTextBox_KeyDown, etc.) 
+    // are defined in StartMenuWindow.Launch.cs
 }

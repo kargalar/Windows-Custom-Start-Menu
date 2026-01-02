@@ -318,7 +318,8 @@ public partial class StartMenuWindow
             var pinItem = new MenuItem { Header = "Pinle" };
             pinItem.Click += (s, args) =>
             {
-                _pinnedItemsService.AddPin(path, _currentTabId);
+                var gridColumns = CalculateGridColumns();
+                _pinnedItemsService.AddPin(path, _currentTabId, null, gridColumns);
             };
             contextMenu.Items.Add(pinItem);
         }

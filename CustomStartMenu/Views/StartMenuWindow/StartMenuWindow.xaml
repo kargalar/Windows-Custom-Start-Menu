@@ -394,11 +394,7 @@
                 <!-- Pinned Items with Groups -->
                 <ScrollViewer x:Name="PinnedScrollViewer" 
                               VerticalScrollBarVisibility="Auto" 
-                              HorizontalScrollBarVisibility="Disabled"
-                              AllowDrop="True"
-                              Drop="PinnedScrollViewer_Drop"
-                              DragOver="PinnedScrollViewer_DragOver"
-                              PreviewMouseRightButtonUp="PinnedScrollViewer_RightClick">
+                              HorizontalScrollBarVisibility="Disabled">
                     <StackPanel x:Name="PinnedItemsContainer"/>
                 </ScrollViewer>
             </Grid>

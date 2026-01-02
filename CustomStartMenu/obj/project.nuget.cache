@@ -1,8 +1,8 @@
 {
   "version": 2,
-  "dgSpecHash": "XltCG+yk93k=",
+  "dgSpecHash": "Pj6hgTVBhwU=",
   "success": true,
-  "projectFilePath": "C:\\KARGALAR\\Projeler\\Windows\\windows\\CustomStartMenu\\CustomStartMenu.csproj",
+  "projectFilePath": "c:\\KARGALAR\\Projeler\\Windows\\windows\\CustomStartMenu\\CustomStartMenu.csproj",
   "expectedPackageFiles": [
     "C:\\Users\\Kargalar\\.nuget\\packages\\hardcodet.notifyicon.wpf\\1.1.0\\hardcodet.notifyicon.wpf.1.1.0.nupkg.sha512",
     "C:\\Users\\Kargalar\\.nuget\\packages\\microsoft.windows.sdk.net.ref\\10.0.19041.57\\microsoft.windows.sdk.net.ref.10.0.19041.57.nupkg.sha512"
