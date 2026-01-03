@@ -50,6 +50,10 @@ public class KeyboardHookService : IDisposable
 
     // For KBDLLHOOKSTRUCT flags
     private const uint LLKHF_INJECTED = 0x00000010;
+    
+    // For keybd_event / SendInput
+    private const uint KEYEVENTF_KEYUP = 0x0002;
+    private const uint INPUT_KEYBOARD = 1;
 
     [StructLayout(LayoutKind.Sequential)]
     private struct KBDLLHOOKSTRUCT
@@ -57,6 +61,29 @@ public class KeyboardHookService : IDisposable
         public uint vkCode;
         public uint scanCode;
         public uint flags;
+        public uint time;
+        public IntPtr dwExtraInfo;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct INPUT
+    {
+        public uint type;
+        public INPUTUNION u;
+    }
+
+    [StructLayout(LayoutKind.Explicit)]
+    private struct INPUTUNION
+    {
+        [FieldOffset(0)] public KEYBDINPUT ki;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct KEYBDINPUT
+    {
+        public ushort wVk;
+        public ushort wScan;
+        public uint dwFlags;
         public uint time;
         public IntPtr dwExtraInfo;
     }
@@ -85,6 +112,9 @@ public class KeyboardHookService : IDisposable
     
     [DllImport("user32.dll")]
     private static extern bool GetKeyboardState(byte[] lpKeyState);
+    
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
 
     #endregion
 
@@ -93,6 +123,7 @@ public class KeyboardHookService : IDisposable
     private bool _isDisposed;
     private bool _winKeyDown;
     private bool _otherKeyPressed;
+    private int _pendingKeyCode; // Store the key code that was pressed with Win
 
     // Hotkey configuration
     private HotkeyConfig _hotkeyConfig = new();
@@ -203,147 +234,172 @@ public class KeyboardHookService : IDisposable
         return null;
     }
 
-    private bool CheckModifiers()
+    private bool CheckModifiersMatch()
     {
         bool ctrlPressed = IsModifierPressed(VK_LCONTROL) || IsModifierPressed(VK_RCONTROL);
         bool altPressed = IsModifierPressed(VK_LMENU) || IsModifierPressed(VK_RMENU);
         bool shiftPressed = IsModifierPressed(VK_LSHIFT) || IsModifierPressed(VK_RSHIFT);
         bool winPressed = IsModifierPressed(VK_LWIN) || IsModifierPressed(VK_RWIN);
 
-        // Check if configured modifiers match
-        return (_hotkeyConfig.UseWinKey == winPressed || _hotkeyConfig.UseWinKey && _winKeyDown) &&
+        return _hotkeyConfig.UseWinKey == winPressed &&
                _hotkeyConfig.Ctrl == ctrlPressed &&
                _hotkeyConfig.Alt == altPressed &&
                _hotkeyConfig.Shift == shiftPressed;
     }
+    
+    /// <summary>
+    /// Simulates a Win + key combination
+    /// </summary>
+    private void SimulateWinKeyCombo(int keyCode)
+    {
+        var inputs = new INPUT[4];
+        
+        // Win key down
+        inputs[0].type = INPUT_KEYBOARD;
+        inputs[0].u.ki.wVk = (ushort)VK_LWIN;
+        inputs[0].u.ki.dwFlags = 0;
+        
+        // Other key down
+        inputs[1].type = INPUT_KEYBOARD;
+        inputs[1].u.ki.wVk = (ushort)keyCode;
+        inputs[1].u.ki.dwFlags = 0;
+        
+        // Other key up
+        inputs[2].type = INPUT_KEYBOARD;
+        inputs[2].u.ki.wVk = (ushort)keyCode;
+        inputs[2].u.ki.dwFlags = KEYEVENTF_KEYUP;
+        
+        // Win key up
+        inputs[3].type = INPUT_KEYBOARD;
+        inputs[3].u.ki.wVk = (ushort)VK_LWIN;
+        inputs[3].u.ki.dwFlags = KEYEVENTF_KEYUP;
+        
+        SendInput(4, inputs, Marshal.SizeOf<INPUT>());
+    }
 
     private IntPtr HookCallback(int nCode, IntPtr wParam, IntPtr lParam)
     {
-        if (nCode >= 0)
+        if (nCode < 0)
+            return CallNextHookEx(_hookId, nCode, wParam, lParam);
+
+        var hookStruct = Marshal.PtrToStructure<KBDLLHOOKSTRUCT>(lParam);
+        int vkCode = (int)hookStruct.vkCode;
+        int msg = wParam.ToInt32();
+        bool isKeyDown = msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN;
+        bool isKeyUp = msg == WM_KEYUP || msg == WM_SYSKEYUP;
+        bool isWinKey = vkCode == VK_LWIN || vkCode == VK_RWIN;
+
+        // === HOTKEY ASSIGNMENT MODE ===
+        if (SuppressWinKey)
         {
-            var hookStruct = Marshal.PtrToStructure<KBDLLHOOKSTRUCT>(lParam);
-            int vkCode = (int)hookStruct.vkCode;
-            int msg = wParam.ToInt32();
-
-            // Check if it's Windows key (Left or Right)
-            bool isWinKey = vkCode == VK_LWIN || vkCode == VK_RWIN;
-
-            // If SuppressWinKey is enabled (hotkey assignment mode)
-            if (SuppressWinKey)
+            if (isKeyDown)
             {
-                // Only handle key down events
-                if (msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN)
-                {
-                    bool ctrlPressed = IsModifierPressed(VK_LCONTROL) || IsModifierPressed(VK_RCONTROL);
-                    bool altPressed = IsModifierPressed(VK_LMENU) || IsModifierPressed(VK_RMENU);
-                    bool shiftPressed = IsModifierPressed(VK_LSHIFT) || IsModifierPressed(VK_RSHIFT);
-                    bool winPressed = IsModifierPressed(VK_LWIN) || IsModifierPressed(VK_RWIN) || isWinKey;
-
-                    Debug.WriteLine($"Key pressed for assignment: {vkCode}, Win={winPressed}, Ctrl={ctrlPressed}, Alt={altPressed}, Shift={shiftPressed}");
-                    
-                    KeyPressedForAssignment?.Invoke(this, new KeyPressedEventArgs(vkCode, winPressed, ctrlPressed, altPressed, shiftPressed));
-                }
-                
-                // Block Win key to prevent Windows Start menu
-                if (isWinKey)
-                {
-                    return new IntPtr(1);
-                }
-                
-                return CallNextHookEx(_hookId, nCode, wParam, lParam);
-            }
-            
-            // Capture text input when menu is open
-            if (CaptureTextInput && (msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN))
-            {
-                // Don't capture if modifier keys are held (except Shift)
                 bool ctrlPressed = IsModifierPressed(VK_LCONTROL) || IsModifierPressed(VK_RCONTROL);
                 bool altPressed = IsModifierPressed(VK_LMENU) || IsModifierPressed(VK_RMENU);
-                
-                if (!ctrlPressed && !altPressed && !isWinKey && !_winKeyDown)
+                bool shiftPressed = IsModifierPressed(VK_LSHIFT) || IsModifierPressed(VK_RSHIFT);
+                bool winPressed = IsModifierPressed(VK_LWIN) || IsModifierPressed(VK_RWIN) || isWinKey;
+
+                KeyPressedForAssignment?.Invoke(this, new KeyPressedEventArgs(vkCode, winPressed, ctrlPressed, altPressed, shiftPressed));
+            }
+            
+            // Block Win key to prevent Windows Start menu
+            if (isWinKey)
+                return new IntPtr(1);
+            
+            return CallNextHookEx(_hookId, nCode, wParam, lParam);
+        }
+
+        // === TEXT CAPTURE MODE (when menu is open) ===
+        if (CaptureTextInput && isKeyDown && !isWinKey)
+        {
+            bool ctrlPressed = IsModifierPressed(VK_LCONTROL) || IsModifierPressed(VK_RCONTROL);
+            bool altPressed = IsModifierPressed(VK_LMENU) || IsModifierPressed(VK_RMENU);
+            bool winPressed = IsModifierPressed(VK_LWIN) || IsModifierPressed(VK_RWIN);
+            
+            if (!ctrlPressed && !altPressed && !winPressed)
+            {
+                var character = VirtualKeyToChar((uint)vkCode, hookStruct.scanCode);
+                if (character.HasValue && !char.IsControl(character.Value))
                 {
-                    // Convert virtual key to character
-                    var character = VirtualKeyToChar((uint)vkCode, hookStruct.scanCode);
-                    if (character.HasValue && !char.IsControl(character.Value))
-                    {
-                        CharacterInput?.Invoke(this, character.Value);
-                    }
+                    CharacterInput?.Invoke(this, character.Value);
                 }
             }
+        }
 
-            // Should we intercept Win key? Either for override or because hotkey uses Win
-            bool shouldInterceptWinKey = _overrideWindowsButton || _hotkeyConfig.UseWinKey;
-
-            // Handle Windows key
-            if (isWinKey && shouldInterceptWinKey)
+        // === HOTKEY DETECTION ===
+        // Case 1: Hotkey is Win key alone
+        if (_hotkeyConfig.UseWinKey && _hotkeyConfig.KeyCode == 0 && 
+            !_hotkeyConfig.Ctrl && !_hotkeyConfig.Alt && !_hotkeyConfig.Shift)
+        {
+            if (isWinKey)
             {
-                if (msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN)
+                if (isKeyDown)
                 {
-                    if (!_winKeyDown)
-                    {
-                        _winKeyDown = true;
-                        _otherKeyPressed = false;
-                        Debug.WriteLine("Win key down");
-                    }
-                    // Don't block Win key press - let it through for Win+X combinations
-                    // We only suppress the Start Menu on key release if no other key was pressed
+                    _winKeyDown = true;
+                    _otherKeyPressed = false;
+                    _pendingKeyCode = 0;
+                    return new IntPtr(1); // Block Win key - don't let Windows see it
                 }
-                else if (msg == WM_KEYUP || msg == WM_SYSKEYUP)
+                else if (isKeyUp)
                 {
                     bool shouldTrigger = _winKeyDown && !_otherKeyPressed;
                     _winKeyDown = false;
                     
-                    // If another key was pressed with Win, let the combination go through
-                    if (_otherKeyPressed)
+                    if (_otherKeyPressed && _pendingKeyCode > 0)
                     {
+                        // User pressed Win + another key, simulate the Windows shortcut
                         _otherKeyPressed = false;
-                        Debug.WriteLine("Win key released after combination - allowing native shortcut");
-                        return CallNextHookEx(_hookId, nCode, wParam, lParam);
+                        SimulateWinKeyCombo(_pendingKeyCode);
+                        _pendingKeyCode = 0;
+                        return new IntPtr(1);
                     }
                     
                     _otherKeyPressed = false;
-
-                    // Trigger if Win key only and that's the configured hotkey
-                    if (shouldTrigger && _hotkeyConfig.UseWinKey && _hotkeyConfig.KeyCode == 0 &&
-                        !_hotkeyConfig.Ctrl && !_hotkeyConfig.Alt && !_hotkeyConfig.Shift)
+                    _pendingKeyCode = 0;
+                    
+                    if (shouldTrigger)
                     {
-                        Debug.WriteLine("Win key released - triggering custom menu");
                         HotkeyPressed?.Invoke(this, EventArgs.Empty);
                     }
-
-                    // Block the default Start Menu only when Win was pressed alone
-                    return new IntPtr(1);
+                    return new IntPtr(1); // Block Win key up too
                 }
             }
-            else if (_winKeyDown && !isWinKey && _hotkeyConfig.UseWinKey)
+            else if (_winKeyDown && isKeyDown)
             {
-                // Another key was pressed while Win key is held (and hotkey uses Win)
+                // Another key pressed while our tracked Win is "held"
+                // Don't process it now, wait for Win key release to simulate the combo
                 _otherKeyPressed = true;
-                Debug.WriteLine($"Win + {vkCode} combination detected");
-
-                // Check if this is our configured hotkey combination
-                if (_hotkeyConfig.KeyCode == vkCode && (msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN))
-                {
-                    if (CheckModifiers())
-                    {
-                        Debug.WriteLine($"Custom hotkey triggered: {_hotkeyConfig}");
-                        HotkeyPressed?.Invoke(this, EventArgs.Empty);
-                        return new IntPtr(1); // Block the key
-                    }
-                }
+                _pendingKeyCode = vkCode;
+                return new IntPtr(1); // Block this key too, we'll simulate Win+key later
             }
-            // Handle non-Win key hotkeys (e.g., Ctrl+Alt+Space)
-            else if (!_hotkeyConfig.UseWinKey && _hotkeyConfig.KeyCode > 0)
+            else if (_winKeyDown && isKeyUp && vkCode == _pendingKeyCode)
             {
-                if (vkCode == _hotkeyConfig.KeyCode && (msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN))
-                {
-                    if (CheckModifiers())
-                    {
-                        Debug.WriteLine($"Custom hotkey triggered: {_hotkeyConfig}");
-                        HotkeyPressed?.Invoke(this, EventArgs.Empty);
-                        return new IntPtr(1); // Block the key
-                    }
-                }
+                // The other key was released - we'll simulate when Win is released
+                return new IntPtr(1); // Block the key up
+            }
+            
+            return CallNextHookEx(_hookId, nCode, wParam, lParam);
+        }
+        
+        // Case 2: Hotkey is Win + another key
+        if (_hotkeyConfig.UseWinKey && _hotkeyConfig.KeyCode > 0)
+        {
+            if (isKeyDown && vkCode == _hotkeyConfig.KeyCode && CheckModifiersMatch())
+            {
+                HotkeyPressed?.Invoke(this, EventArgs.Empty);
+                return new IntPtr(1);
+            }
+            // Let all other keys pass through normally
+            return CallNextHookEx(_hookId, nCode, wParam, lParam);
+        }
+        
+        // Case 3: Hotkey without Win key (e.g., Ctrl+Alt+Space)
+        if (!_hotkeyConfig.UseWinKey && _hotkeyConfig.KeyCode > 0)
+        {
+            if (isKeyDown && vkCode == _hotkeyConfig.KeyCode && CheckModifiersMatch())
+            {
+                HotkeyPressed?.Invoke(this, EventArgs.Empty);
+                return new IntPtr(1);
             }
         }
 
