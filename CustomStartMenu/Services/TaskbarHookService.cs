@@ -69,6 +69,7 @@ public class TaskbarHookService : IDisposable
     private const uint WINEVENT_SKIPOWNPROCESS = 0x0002;
     private const uint WM_CLOSE = 0x0010;
     private const int SW_HIDE = 0;
+    private const int SW_SHOW = 5;
     
     // Virtual key codes
     private const byte VK_ESCAPE = 0x1B;
@@ -137,6 +138,10 @@ public class TaskbarHookService : IDisposable
             _winEventHook = IntPtr.Zero;
             Debug.WriteLine("Taskbar hook removed");
         }
+        
+        // Restore Windows Start Menu functionality
+        RestoreWindowsStartMenu();
+        
         _isEnabled = false;
     }
 
@@ -307,6 +312,45 @@ public class TaskbarHookService : IDisposable
     {
         GetWindowThreadProcessId(hwnd, out uint processId);
         return processId;
+    }
+
+    /// <summary>
+    /// Restore Windows Start Menu functionality when hook is disabled
+    /// This restarts the StartMenuExperienceHost process to fully restore functionality
+    /// </summary>
+    private void RestoreWindowsStartMenu()
+    {
+        try
+        {
+            Debug.WriteLine("Restoring Windows Start Menu functionality...");
+            
+            // Restart StartMenuExperienceHost to fully restore Windows Start Menu
+            var processes = new[] { "StartMenuExperienceHost", "ShellExperienceHost" };
+            
+            foreach (var processName in processes)
+            {
+                try
+                {
+                    var procs = Process.GetProcessesByName(processName);
+                    foreach (var proc in procs)
+                    {
+                        Debug.WriteLine($"Restarting {processName} (PID: {proc.Id})");
+                        proc.Kill();
+                        proc.WaitForExit(1000);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"Could not restart {processName}: {ex.Message}");
+                }
+            }
+            
+            Debug.WriteLine("Windows Start Menu restored");
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Error restoring Windows Start Menu: {ex.Message}");
+        }
     }
 
     /// <summary>
