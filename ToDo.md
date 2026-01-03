@@ -10,3 +10,5 @@ arama kısmında her şeyi göstermiyor. bilgisayar yüklü utgualamrı da getir
 
 artık taskbardan da açılıyor. menu açıkken taskbar görünür olsun. menünün konudumu taskbarın üstüne gelmesin. biraz daha yukartıda olsun
 menu açıkken windows taskbarda icon gösterilmesin. sadece system tray kısmnda iconu her zaman görünür olacak açıkken.
+
+programı kapatınca windows start menüsü açılsın

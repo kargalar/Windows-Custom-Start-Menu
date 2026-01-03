@@ -285,13 +285,22 @@ public class KeyboardHookService : IDisposable
                         _otherKeyPressed = false;
                         Debug.WriteLine("Win key down");
                     }
-                    // Block the default Start Menu
-                    return new IntPtr(1);
+                    // Don't block Win key press - let it through for Win+X combinations
+                    // We only suppress the Start Menu on key release if no other key was pressed
                 }
                 else if (msg == WM_KEYUP || msg == WM_SYSKEYUP)
                 {
                     bool shouldTrigger = _winKeyDown && !_otherKeyPressed;
                     _winKeyDown = false;
+                    
+                    // If another key was pressed with Win, let the combination go through
+                    if (_otherKeyPressed)
+                    {
+                        _otherKeyPressed = false;
+                        Debug.WriteLine("Win key released after combination - allowing native shortcut");
+                        return CallNextHookEx(_hookId, nCode, wParam, lParam);
+                    }
+                    
                     _otherKeyPressed = false;
 
                     // Trigger if Win key only and that's the configured hotkey
@@ -302,7 +311,7 @@ public class KeyboardHookService : IDisposable
                         HotkeyPressed?.Invoke(this, EventArgs.Empty);
                     }
 
-                    // Block the default Start Menu
+                    // Block the default Start Menu only when Win was pressed alone
                     return new IntPtr(1);
                 }
             }
