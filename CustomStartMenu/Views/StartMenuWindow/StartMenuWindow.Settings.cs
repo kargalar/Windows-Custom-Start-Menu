@@ -1,10 +1,13 @@
 using System.Diagnostics;
+using System.IO;
+using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using CustomStartMenu.Models;
 using CustomStartMenu.Services;
+using Microsoft.Win32;
 
 namespace CustomStartMenu.Views;
 
@@ -441,4 +444,144 @@ public partial class StartMenuWindow
                 MessageBoxImage.Information);
         }
     }
+
+    private void ExportDataButton_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var saveDialog = new SaveFileDialog
+            {
+                Title = "Verileri Dışa Aktar",
+                Filter = "JSON dosyası (*.json)|*.json",
+                FileName = $"CustomStartMenu_Backup_{DateTime.Now:yyyyMMdd_HHmmss}.json",
+                DefaultExt = ".json"
+            };
+
+            if (saveDialog.ShowDialog() == true)
+            {
+                var exportData = new ExportData
+                {
+                    ExportDate = DateTime.Now,
+                    Version = "1.0",
+                    Settings = _settingsService.Settings,
+                    PinnedItemsConfig = new PinnedItemsConfig
+                    {
+                        Tabs = _pinnedItemsService.Tabs.ToList(),
+                        Groups = _pinnedItemsService.Groups.ToList(),
+                        Items = _pinnedItemsService.PinnedItems.ToList()
+                    }
+                };
+
+                var json = JsonSerializer.Serialize(exportData, new JsonSerializerOptions
+                {
+                    WriteIndented = true,
+                    PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+                });
+
+                File.WriteAllText(saveDialog.FileName, json);
+
+                MessageBox.Show(
+                    $"Veriler başarıyla dışa aktarıldı:\n{saveDialog.FileName}",
+                    "Dışa Aktarma Başarılı",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+            }
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(
+                $"Dışa aktarma sırasında bir hata oluştu:\n{ex.Message}",
+                "Hata",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+        }
+    }
+
+    private void ImportDataButton_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var openDialog = new OpenFileDialog
+            {
+                Title = "Verileri İçe Aktar",
+                Filter = "JSON dosyası (*.json)|*.json",
+                DefaultExt = ".json"
+            };
+
+            if (openDialog.ShowDialog() == true)
+            {
+                var result = MessageBox.Show(
+                    "Mevcut tüm veriler içe aktarılan verilerle değiştirilecek.\n\nDevam etmek istiyor musunuz?",
+                    "İçe Aktarmayı Onayla",
+                    MessageBoxButton.YesNo,
+                    MessageBoxImage.Warning);
+
+                if (result != MessageBoxResult.Yes) return;
+
+                var json = File.ReadAllText(openDialog.FileName);
+                var importData = JsonSerializer.Deserialize<ExportData>(json, new JsonSerializerOptions
+                {
+                    PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+                });
+
+                if (importData == null)
+                {
+                    MessageBox.Show(
+                        "Dosya okunamadı veya geçersiz format.",
+                        "Hata",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Error);
+                    return;
+                }
+
+                // Import settings
+                if (importData.Settings != null)
+                {
+                    _settingsService.ImportSettings(importData.Settings);
+                }
+
+                // Import pinned items
+                if (importData.PinnedItemsConfig != null)
+                {
+                    _pinnedItemsService.ImportConfig(importData.PinnedItemsConfig);
+                }
+
+                // Update current tab
+                _currentTabId = _pinnedItemsService.DefaultTab.Id;
+
+                // Refresh UI
+                RefreshTabs();
+                RefreshPinnedItems();
+                LoadSettingsIntoControls();
+                ApplyTransparency();
+                PositionWindow();
+                App.Instance.ApplyThemeColor(_settingsService.Settings.AccentColor);
+
+                MessageBox.Show(
+                    "Veriler başarıyla içe aktarıldı.",
+                    "İçe Aktarma Başarılı",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+            }
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(
+                $"İçe aktarma sırasında bir hata oluştu:\n{ex.Message}",
+                "Hata",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+        }
+    }
+}
+
+/// <summary>
+/// Data structure for export/import
+/// </summary>
+public class ExportData
+{
+    public DateTime ExportDate { get; set; }
+    public string Version { get; set; } = "1.0";
+    public AppSettings? Settings { get; set; }
+    public PinnedItemsConfig? PinnedItemsConfig { get; set; }
 }

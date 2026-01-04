@@ -907,6 +907,70 @@
                                         Click="ClearAllDataButton_Click"/>
                             </Grid>
                         </Border>
+
+                        <!-- Separator -->
+                        <Border Height="1" Background="#30FFFFFF" Margin="0,8,0,20"/>
+                        <TextBlock Text="Dışa / İçe Aktar"
+                                   FontSize="16"
+                                   FontWeight="SemiBold"
+                                   Foreground="{StaticResource TextBrush}"
+                                   Margin="0,0,0,16"/>
+
+                        <!-- Export Data -->
+                        <Border Background="#15FFFFFF" CornerRadius="8" Padding="16" Margin="0,0,0,12">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                
+                                <StackPanel Grid.Column="0">
+                                    <TextBlock Text="Verileri dışa aktar"
+                                               FontSize="14"
+                                               Foreground="{StaticResource TextBrush}"/>
+                                    <TextBlock Text="Tüm ayarları ve sabitlenmiş öğeleri bir dosyaya kaydet"
+                                               FontSize="12"
+                                               Foreground="{StaticResource TextSecondaryBrush}"
+                                               Margin="0,4,0,0"/>
+                                </StackPanel>
+                                
+                                <Button x:Name="ExportDataButton"
+                                        Grid.Column="1"
+                                        Content="Dışa Aktar"
+                                        Style="{StaticResource MenuButtonStyle}"
+                                        Background="#0078D4"
+                                        Padding="16,8"
+                                        Click="ExportDataButton_Click"/>
+                            </Grid>
+                        </Border>
+
+                        <!-- Import Data -->
+                        <Border Background="#15FFFFFF" CornerRadius="8" Padding="16" Margin="0,0,0,12">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                
+                                <StackPanel Grid.Column="0">
+                                    <TextBlock Text="Verileri içe aktar"
+                                               FontSize="14"
+                                               Foreground="{StaticResource TextBrush}"/>
+                                    <TextBlock Text="Daha önce dışa aktarılmış bir dosyadan verileri geri yükle"
+                                               FontSize="12"
+                                               Foreground="{StaticResource TextSecondaryBrush}"
+                                               Margin="0,4,0,0"/>
+                                </StackPanel>
+                                
+                                <Button x:Name="ImportDataButton"
+                                        Grid.Column="1"
+                                        Content="İçe Aktar"
+                                        Style="{StaticResource MenuButtonStyle}"
+                                        Background="#059669"
+                                        Padding="16,8"
+                                        Click="ImportDataButton_Click"/>
+                            </Grid>
+                        </Border>
                     </StackPanel>
                 </ScrollViewer>
             </Grid>

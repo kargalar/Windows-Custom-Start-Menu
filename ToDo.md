@@ -11,5 +11,4 @@ arama kısmında her şeyi göstermiyor. bilgisayar yüklü utgualamrı da getir
 artık taskbardan da açılıyor. menu açıkken taskbar görünür olsun. menünün konudumu taskbarın üstüne gelmesin. biraz daha yukartıda olsun
 menu açıkken windows taskbarda icon gösterilmesin. sadece system tray kısmnda iconu her zaman görünür olacak açıkken.
 
-
 bak şimdi o sorun gitti ama şimdi de win+e kısayolunu kullanamıyorum. yani sadece o değil. win ile bağlatılı diğer kısyolları da. sen basılı tutuma durumun değil basma durumunu alacaksın sadece. gerisni kendi kalinde bırak.

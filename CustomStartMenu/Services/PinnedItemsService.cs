@@ -219,6 +219,28 @@ public class PinnedItemsService : IDisposable
         PinnedItemsChanged?.Invoke(this, EventArgs.Empty);
     }
 
+    /// <summary>
+    /// Import configuration from an external PinnedItemsConfig object
+    /// </summary>
+    public void ImportConfig(PinnedItemsConfig config)
+    {
+        lock (_lockObject)
+        {
+            _tabs = config.Tabs ?? new();
+            _groups = config.Groups ?? new();
+            _pinnedItems = config.Items ?? new();
+
+            // Ensure at least one tab exists
+            if (_tabs.Count == 0)
+            {
+                _tabs.Add(new Tab { Name = "Ana Sayfa", Order = 0 });
+            }
+
+            Save();
+        }
+        PinnedItemsChanged?.Invoke(this, EventArgs.Empty);
+    }
+
     public void RenameTab(string tabId, string newName)
     {
         var tab = _tabs.FirstOrDefault(t => t.Id == tabId);

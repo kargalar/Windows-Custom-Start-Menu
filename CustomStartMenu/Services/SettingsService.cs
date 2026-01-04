@@ -215,6 +215,20 @@ public class SettingsService : IDisposable
         }
     }
 
+    /// <summary>
+    /// Import settings from an external AppSettings object
+    /// </summary>
+    public void ImportSettings(AppSettings settings)
+    {
+        lock (_lockObject)
+        {
+            _settings = settings;
+            ValidateSettings();
+            Save();
+            SettingsChanged?.Invoke(this, EventArgs.Empty);
+        }
+    }
+
     public void Dispose()
     {
         _fileWatcher?.Dispose();
